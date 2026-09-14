@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "190998421033",
+    "project_id": "love-message-2835b",
+    "storage_bucket": "love-message-2835b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:190998421033:android:8c7f705b86ba657628c638",
+        "android_client_info": {
+          "package_name": "com.example.love_message"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCqDCWiwdOFcKoQjScNM65k6-iLhElFLRk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
