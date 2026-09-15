@@ -10,6 +10,9 @@ import '../connections/connection_providers.dart';
 import '../people/loved_one.dart';
 import '../people/people_providers.dart';
 import '../people/person_editor.dart';
+import '../hearts/heart.dart';
+import '../hearts/hearts_providers.dart';
+import '../profile/profile_providers.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -19,18 +22,34 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   var _tab = 0;
+  int? _celebration;
+  int _celebrationSeq = 0;
+  String? _heartsUid;
+  final Set<String> _animatedHeartIds = <String>{};
   @override
   Widget build(BuildContext context) {
     final incomingCount =
         ref.watch(incomingRequestsProvider).value?.length ?? 0;
+    final unseenHearts = ref.watch(unseenHeartsCountProvider);
+    final uid = ref.watch(authStateProvider).value?.uid;
+    if (uid != _heartsUid) {
+      _heartsUid = uid;
+      _animatedHeartIds.clear();
+    }
+    ref.listen<AsyncValue<List<Heart>>>(
+      receivedHeartsProvider,
+      _onHeartsReceived,
+    );
     final pages = <Widget>[
       WorldPage(onChoose: _openSend),
       const LittleWordsPage(),
       const ReceivePage(),
     ];
     return Scaffold(
-      body: SafeArea(
-        child: Column(
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 18, 8, 8),
@@ -79,23 +98,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ],
         ),
       ),
+          if (_celebration != null)
+            Positioned.fill(
+              child: HeartsCelebration(
+                key: ValueKey(_celebrationSeq),
+                count: _celebration!,
+                onDone: () {
+                  if (mounted) setState(() => _celebration = null);
+                },
+              ),
+            ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (value) => setState(() => _tab = value),
-        destinations: const [
-          NavigationDestination(
+        onDestinationSelected: _onTabSelected,
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.people_alt_outlined),
             selectedIcon: Icon(Icons.people_alt),
             label: 'Mon monde',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.chat_bubble_outline),
             selectedIcon: Icon(Icons.chat_bubble),
             label: 'Petits mots',
           ),
           NavigationDestination(
-            icon: Icon(Icons.auto_awesome_outlined),
-            selectedIcon: Icon(Icons.auto_awesome),
+            icon: Badge.count(
+              count: unseenHearts,
+              isLabelVisible: unseenHearts > 0,
+              child: const Icon(Icons.auto_awesome_outlined),
+            ),
+            selectedIcon: const Icon(Icons.auto_awesome),
             label: 'Recevoir',
           ),
         ],
@@ -106,6 +141,61 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void _openSend(LovedOne person) => Navigator.of(
     context,
   ).push(MaterialPageRoute<void>(builder: (_) => SendLovePage(person: person)));
+
+  void _onTabSelected(int value) {
+    final previous = _tab;
+    setState(() => _tab = value);
+    // On marque les coeurs comme vus en QUITTANT l'onglet Recevoir : ils
+    // restent affiches pendant la consultation, puis disparaissent ensuite.
+    if (previous == 2 && value != 2) {
+      final uid = ref.read(authStateProvider).value?.uid;
+      if (uid != null) {
+        _markSeen(uid);
+      }
+    }
+  }
+
+  Future<void> _markSeen(String uid) async {
+    try {
+      await ref.read(heartsRepositoryProvider).markAllSeen(uid);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Marquage "vus" echoue : $e')),
+        );
+      }
+    }
+  }
+
+  void _onHeartsReceived(
+    AsyncValue<List<Heart>>? previous,
+    AsyncValue<List<Heart>> next,
+  ) {
+    // On ignore les etats transitoires (chargement, reconnexion en cours).
+    if (next.isLoading) return;
+    final list = next.value;
+    if (list == null) return;
+
+    // Coeurs encore non-vus a cet instant.
+    final unseen = list.where((h) => !h.seen).toList();
+    // Au moins un non-vu pas encore anime cette session ?
+    final hasNew = unseen.any((h) => !_animatedHeartIds.contains(h.id));
+    // On memorise tous les non-vus courants comme deja animes (evite la boucle).
+    _animatedHeartIds
+      ..clear()
+      ..addAll(unseen.map((h) => h.id));
+    if (!hasNew) return;
+
+    // On anime avec le TOTAL des coeurs encore non-vus.
+    final totalUnseen = unseen.fold<int>(0, (sum, h) => sum + h.count);
+    if (totalUnseen > 0) {
+      setState(() {
+        _tab = 0;
+        _celebration = totalUnseen;
+        _celebrationSeq++;
+      });
+    }
+  }
 }
 
 class WorldPage extends ConsumerWidget {
@@ -369,17 +459,18 @@ class _PersonCard extends StatelessWidget {
   }
 }
 
-class SendLovePage extends StatefulWidget {
+class SendLovePage extends ConsumerStatefulWidget {
   const SendLovePage({super.key, required this.person});
   final LovedOne person;
   @override
-  State<SendLovePage> createState() => _SendLovePageState();
+  ConsumerState<SendLovePage> createState() => _SendLovePageState();
 }
 
-class _SendLovePageState extends State<SendLovePage>
+class _SendLovePageState extends ConsumerState<SendLovePage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   var _count = 0;
+  bool _sending = false;
   @override
   void initState() {
     super.initState();
@@ -398,6 +489,77 @@ class _SendLovePageState extends State<SendLovePage>
   void _sendHeart() {
     setState(() => _count++);
     _controller.forward(from: 0);
+  }
+
+  Future<void> _confirmSend() async {
+    final person = widget.person;
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final s = _count > 1 ? 's' : '';
+
+    final linkedUid = person.linkedUid;
+
+    // La connexion est effective si :
+    //  - cote accepteur : la carte est stockee en 'accepted' ;
+    //  - cote expediteur : la demande envoyee est passee a 'accepted'.
+    var connected = false;
+    if (linkedUid != null) {
+      if (person.linkStatus == 'accepted') {
+        connected = true;
+      } else if (person.requestId != null) {
+        final outgoing = ref.read(outgoingRequestsProvider).value ?? const [];
+        connected = outgoing
+            .any((r) => r.id == person.requestId && r.status == 'accepted');
+      }
+    }
+
+    // Proche connecte -> envoi reel des coeurs.
+    if (linkedUid != null && connected) {
+      final me = ref.read(authStateProvider).value;
+      if (me == null) return;
+      final profile = ref.read(userProfileProvider).value;
+      String? pick(String? v) =>
+          (v != null && v.trim().isNotEmpty) ? v.trim() : null;
+      final myName = pick(profile?.displayName) ??
+          pick(me.displayName) ??
+          pick(profile?.username) ??
+          pick(me.email?.split('@').first) ??
+          'Quelqu\'un';
+      setState(() => _sending = true);
+      try {
+        await ref.read(heartsRepositoryProvider).send(
+              fromUid: me.uid,
+              fromName: myName,
+              toUid: linkedUid,
+              count: _count,
+            );
+        navigator.pop();
+        messenger.showSnackBar(
+          SnackBar(content: Text('$_count cœur$s envoyé$s à ${person.name} 💌')),
+        );
+      } catch (e) {
+        if (mounted) setState(() => _sending = false);
+        messenger.showSnackBar(
+          SnackBar(content: Text('Echec de l\'envoi : $e')),
+        );
+      }
+      return;
+    }
+
+    // Proche relie mais pas encore accepte.
+    if (linkedUid != null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Ce proche n\'a pas encore accepte la connexion — tu pourras lui '
+              'envoyer des coeurs une fois connecte.'),
+        ),
+      );
+      return;
+    }
+
+    // Proche local (pas de compte connecte) -> celebration locale.
+    _sent(context, _count, person.name);
   }
 
   @override
@@ -472,14 +634,23 @@ class _SendLovePageState extends State<SendLovePage>
             const Text('Chaque appui prépare un cœur pour ton proche.'),
             const Spacer(),
             FilledButton.icon(
-              onPressed: _count == 0
-                  ? null
-                  : () => _sent(context, _count, widget.person.name),
-              icon: const Icon(Icons.send_rounded),
+              onPressed: (_count == 0 || _sending) ? null : _confirmSend,
+              icon: _sending
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.send_rounded),
               label: Text(
-                _count == 0
-                    ? 'Envoie quelques cœurs'
-                    : 'Envoyer $_count cœur${_count > 1 ? 's' : ''}',
+                _sending
+                    ? 'Envoi...'
+                    : (_count == 0
+                        ? 'Envoie quelques cœurs'
+                        : 'Envoyer $_count cœur${_count > 1 ? 's' : ''}'),
               ),
               style: FilledButton.styleFrom(
                 backgroundColor: kPink,
@@ -536,50 +707,130 @@ class LittleWordsPage extends StatelessWidget {
   );
 }
 
-class ReceivePage extends StatelessWidget {
+class ReceivePage extends ConsumerWidget {
   const ReceivePage({super.key});
+
   @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(28),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('✨  💗  ✨', style: TextStyle(fontSize: 48)),
-          const SizedBox(height: 16),
-          const Text(
-            'Une pluie d’amour',
-            style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Ici, les cœurs reçus apparaîtront comme une petite fête.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              color: kLavender.withValues(alpha: .35),
-              borderRadius: BorderRadius.circular(28),
-            ),
-            child: const Column(
-              children: [
-                Text(
-                  'Léa t’envoie plein d’amour 💌',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Tu as reçu 24 cœurs !',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-                ),
-              ],
-            ),
-          ),
-        ],
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(receivedHeartsProvider);
+    return async.when(
+      loading: () =>
+          const Center(child: CircularProgressIndicator(color: kPink)),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('Impossible de charger les cœurs reçus.\n$e',
+              textAlign: TextAlign.center),
+        ),
       ),
+      data: (all) => _content(all.where((h) => !h.seen).toList()),
+    );
+  }
+
+  Widget _content(List<Heart> hearts) {
+    final total = hearts.fold<int>(0, (sum, h) => sum + h.count);
+    if (hearts.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('✨  💗  ✨', style: TextStyle(fontSize: 48)),
+              SizedBox(height: 16),
+              Text('Une pluie d’amour',
+                  style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
+              SizedBox(height: 10),
+              Text(
+                'Ici, les nouveaux cœurs reçus apparaîtront comme une petite fête.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      children: [
+        const Text('Une pluie d’amour',
+            style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: kLavender.withValues(alpha: .35),
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Column(
+            children: [
+              const Text('💗', style: TextStyle(fontSize: 40)),
+              const SizedBox(height: 6),
+              Text('$total',
+                  style: const TextStyle(
+                      fontSize: 40, fontWeight: FontWeight.w800)),
+              Text(
+                'nouveau${total > 1 ? 'x' : ''} cœur${total > 1 ? 's' : ''} 💗',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        for (final h in hearts) ...[
+          _HeartTile(heart: h),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+class _HeartTile extends StatelessWidget {
+  const _HeartTile({required this.heart});
+  final Heart heart;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: heart.seen ? Colors.white : kPink.withValues(alpha: .12),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(
+        color: heart.seen ? Colors.transparent : kPink,
+        width: 1.5,
+      ),
+    ),
+    child: Row(
+      children: [
+        const Text('💌', style: TextStyle(fontSize: 28)),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(heart.fromName,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 16)),
+              const SizedBox(height: 2),
+              Text('t’envoie ${heart.count} cœur${heart.count > 1 ? 's' : ''} 💗'),
+            ],
+          ),
+        ),
+        if (!heart.seen)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: kPink,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text('nouveau',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700)),
+          ),
+      ],
     ),
   );
 }
@@ -745,3 +996,153 @@ void _sent(BuildContext context, int count, String name) => showDialog<void>(
     ],
   ),
 );
+
+/// Overlay de celebration : un compteur central qui pulse, et des coeurs qui
+/// montent puis s'estompent. Joue une fois puis appelle [onDone].
+class HeartsCelebration extends StatefulWidget {
+  const HeartsCelebration({super.key, required this.count, required this.onDone});
+
+  final int count;
+  final VoidCallback onDone;
+
+  @override
+  State<HeartsCelebration> createState() => _HeartsCelebrationState();
+}
+
+class _HeartsCelebrationState extends State<HeartsCelebration>
+    with SingleTickerProviderStateMixin {
+  static const _emojis = ['💗', '💖', '💕', '❤️', '💞', '🩷'];
+
+  late final AnimationController _controller;
+  late final List<_FloatingHeart> _hearts;
+
+  @override
+  void initState() {
+    super.initState();
+    final rand = math.Random();
+    final n = widget.count.clamp(8, 22);
+    _hearts = List.generate(
+      n,
+      (_) => _FloatingHeart(
+        startX: 0.05 + rand.nextDouble() * 0.85,
+        drift: (rand.nextDouble() - 0.5) * 0.18,
+        delay: rand.nextDouble() * 0.4,
+        scale: 0.7 + rand.nextDouble() * 0.9,
+        emoji: _emojis[rand.nextInt(_emojis.length)],
+      ),
+    );
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..forward().whenComplete(widget.onDone);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final size = MediaQuery.of(context).size;
+          final t = _controller.value;
+          return Stack(
+            children: [
+              for (final h in _hearts) _floatingHeart(h, t, size),
+              _counter(t),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _floatingHeart(_FloatingHeart h, double t, Size size) {
+    final local = ((t - h.delay) / (1 - h.delay)).clamp(0.0, 1.0);
+    if (local <= 0) return const SizedBox.shrink();
+    final top = size.height * (0.78 - local * 0.72);
+    final left = size.width * (h.startX + h.drift * local);
+    final opacity =
+        local < 0.15 ? local / 0.15 : (1 - (local - 0.15) / 0.85);
+    return Positioned(
+      left: left,
+      top: top,
+      child: Opacity(
+        opacity: opacity.clamp(0.0, 1.0),
+        child: Transform.scale(
+          scale: h.scale,
+          child: Text(h.emoji, style: const TextStyle(fontSize: 34)),
+        ),
+      ),
+    );
+  }
+
+  Widget _counter(double t) {
+    final appear = (t / 0.22).clamp(0.0, 1.0);
+    final fade = t > 0.72 ? (1 - (t - 0.72) / 0.28).clamp(0.0, 1.0) : 1.0;
+    final opacity = (appear * fade).clamp(0.0, 1.0);
+    final scale = 0.6 + appear * 0.45;
+    return Center(
+      child: Opacity(
+        opacity: opacity,
+        child: Transform.scale(
+          scale: scale,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 18),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: .92),
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [
+                BoxShadow(
+                  color: kPink.withValues(alpha: .35),
+                  blurRadius: 28,
+                  spreadRadius: 6,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('💗', style: TextStyle(fontSize: 46)),
+                const SizedBox(height: 4),
+                Text(
+                  '+${widget.count}',
+                  style: const TextStyle(
+                    fontSize: 42,
+                    fontWeight: FontWeight.w800,
+                    color: kPink,
+                  ),
+                ),
+                Text(
+                  'cœur${widget.count > 1 ? 's' : ''} reçu${widget.count > 1 ? 's' : ''} !',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FloatingHeart {
+  _FloatingHeart({
+    required this.startX,
+    required this.drift,
+    required this.delay,
+    required this.scale,
+    required this.emoji,
+  });
+
+  final double startX;
+  final double drift;
+  final double delay;
+  final double scale;
+  final String emoji;
+}
