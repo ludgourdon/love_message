@@ -15,12 +15,14 @@ class HeartsRepository {
     required String fromName,
     required String toUid,
     required int count,
+    String message = '',
   }) {
     return _col.add({
       'fromUid': fromUid,
       'fromName': fromName,
       'toUid': toUid,
       'count': count,
+      'message': message,
       'seen': false,
       'createdAt': FieldValue.serverTimestamp(),
     });

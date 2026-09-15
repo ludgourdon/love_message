@@ -18,29 +18,70 @@ class DirectoryRepository {
     return snap.exists ? snap.data()!['uid'] as String? : null;
   }
 
-  /// Reclame un username unique pour l'utilisateur.
-  /// Leve [UsernameTakenException] s'il est deja pris par quelqu'un d'autre.
-  Future<void> claimUsername({
+  /// Attribue automatiquement un nom d'utilisateur unique a partir du pseudo,
+  /// s'il n'en a pas deja un. Idempotent : ne fait rien si deja attribue.
+  ///
+  /// Strategie : base = pseudo slugifie, puis base, base1, base2, ... jusqu'a
+  /// en reserver un libre de facon atomique (transaction).
+  Future<String?> ensureUsername({
     required String uid,
-    required String username,
-    String? previousUsernameLower,
+    required String displayName,
+    String? email,
   }) async {
-    final key = normalizeUsername(username);
-    await _firestore.runTransaction((tx) async {
-      final ref = _usernames.doc(key);
-      final snap = await tx.get(ref);
-      if (snap.exists && (snap.data()!['uid'] as String?) != uid) {
-        throw UsernameTakenException();
-      }
-      tx.set(ref, {'uid': uid, 'username': username.trim()});
-      if (previousUsernameLower != null && previousUsernameLower != key) {
-        tx.delete(_usernames.doc(previousUsernameLower));
-      }
-      tx.set(
-        _firestore.collection('users').doc(uid),
-        {'username': username.trim(), 'usernameLower': key},
-        SetOptions(merge: true),
-      );
-    });
+    final userRef = _firestore.collection('users').doc(uid);
+    final snap = await userRef.get();
+    final existing = (snap.data()?['username'] as String?)?.trim();
+    if (existing != null && existing.isNotEmpty) return existing;
+
+    final base = _slugBase(displayName, email);
+    for (var i = 0; i < 50; i++) {
+      final candidate = i == 0 ? base : '$base$i';
+      final claimed = await _tryClaim(uid, userRef, candidate);
+      if (claimed) return candidate;
+    }
+    // Filet de securite (tres improbable) : suffixe base sur l'uid.
+    final fallback = '$base${uid.substring(0, uid.length >= 4 ? 4 : uid.length)}'
+        .toLowerCase();
+    final ok = await _tryClaim(uid, userRef, fallback);
+    return ok ? fallback : null;
+  }
+
+  /// Tente de reserver [candidate] de facon atomique. Renvoie true si reussi.
+  Future<bool> _tryClaim(
+    String uid,
+    DocumentReference<Map<String, dynamic>> userRef,
+    String candidate,
+  ) async {
+    final key = normalizeUsername(candidate);
+    try {
+      await _firestore.runTransaction((tx) async {
+        final ref = _usernames.doc(key);
+        final s = await tx.get(ref);
+        if (s.exists) throw UsernameTakenException();
+        tx.set(ref, {'uid': uid, 'username': candidate});
+        tx.set(
+          userRef,
+          {'username': candidate, 'usernameLower': key},
+          SetOptions(merge: true),
+        );
+      });
+      return true;
+    } on UsernameTakenException {
+      return false;
+    }
+  }
+
+  /// Construit une base d'identifiant : accents retires, minuscules,
+  /// uniquement lettres/chiffres, longueur 3..15.
+  String _slugBase(String displayName, String? email) {
+    var slug = normalizeUsername(displayName).replaceAll(RegExp(r'[^a-z0-9]'), '');
+    if (slug.isEmpty && email != null) {
+      slug = normalizeUsername(email.split('@').first)
+          .replaceAll(RegExp(r'[^a-z0-9]'), '');
+    }
+    if (slug.isEmpty) slug = 'user';
+    if (slug.length > 15) slug = slug.substring(0, 15);
+    if (slug.length < 3) slug = '${slug}user'.substring(0, 4);
+    return slug;
   }
 }

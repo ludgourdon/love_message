@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../theme.dart';
 import '../profile/profile_providers.dart';
 import 'auth_errors.dart';
+import '../connections/connection_providers.dart';
 import 'auth_providers.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -32,17 +33,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    // Capture avant tout await : la redirection go_router detruit cet ecran
+    // des la connexion, donc `ref` ne serait plus utilisable ensuite.
+    final auth = ref.read(authRepositoryProvider);
+    final profileRepo = ref.read(profileRepositoryProvider);
+    final directory = ref.read(directoryRepositoryProvider);
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final auth = ref.read(authRepositoryProvider);
       await auth.signIn(email: _email.text, password: _password.text);
       // Cree le doc profil s'il manque (anciens comptes).
       final user = auth.currentUser;
       if (user != null) {
-        await ref.read(profileRepositoryProvider).ensureProfile(user);
+        await profileRepo.ensureProfile(user);
+        // Rattrape l'attribution du nom d'utilisateur (comptes anterieurs).
+        await directory.ensureUsername(
+              uid: user.uid,
+              displayName: user.displayName ?? '',
+              email: user.email,
+            );
       }
       // La redirection go_router s'occupe de la navigation.
     } on FirebaseAuthException catch (e) {

@@ -40,6 +40,30 @@ Future<void> showPersonEditor(
   );
 }
 
+/// Cree une invitation pour [personName] et ouvre la feuille de partage native
+/// avec un texte personnalise. Utilisable depuis une carte "Invite".
+Future<void> reshareInvitation(
+  WidgetRef ref, {
+  required String uid,
+  required String personName,
+}) async {
+  final profiles = ref.read(profileRepositoryProvider);
+  final connections = ref.read(connectionsRepositoryProvider);
+  final myProfile = await profiles.fetchProfile(uid);
+  final link = await connections.createInvitation(
+    fromUid: uid,
+    fromUsername: myProfile?.username ?? '',
+    personName: personName,
+  );
+  await SharePlus.instance.share(
+    ShareParams(
+      text: '$personName n\'a pas encore de compte, invites le !\n'
+          'Rejoins-moi sur Cœur à cœur 💗 : $link',
+      subject: 'Invitation Cœur à cœur',
+    ),
+  );
+}
+
 class _PersonEditorSheet extends ConsumerStatefulWidget {
   const _PersonEditorSheet({this.existing});
 
@@ -112,20 +136,40 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
         return;
       }
 
-      // Ajout sans connexion.
+      // Profil courant, lu directement dans Firestore (fiable meme si le
+      // provider n'a jamais ete observe, ex. ecran Profil jamais ouvert).
+      final myProfile =
+          await ref.read(profileRepositoryProvider).fetchProfile(user.uid);
+      final myUsername = myProfile?.username ?? '';
+
+      // Champ VIDE -> le proche n'a pas de compte : invitation par lien.
       if (usernameInput.isEmpty) {
+        final link =
+            await ref.read(connectionsRepositoryProvider).createInvitation(
+                  fromUid: user.uid,
+                  fromUsername: myUsername,
+                  personName: name,
+                );
         await peopleRepo.add(
           user.uid,
           name: name,
           note: note,
           emoji: _emoji,
           color: _color,
+          linkStatus: 'invited',
         );
         navigator.pop();
+        await SharePlus.instance.share(
+          ShareParams(
+            text: '$name n\'a pas encore de compte, invites le !\n'
+                'Rejoins-moi sur Cœur à cœur 💗 : $link',
+            subject: 'Invitation Cœur à cœur',
+          ),
+        );
         return;
       }
 
-      // Ajout avec connexion : format du username.
+      // Champ REMPLI -> doit correspondre a un compte existant.
       final formatError = validateUsername(usernameInput);
       if (formatError != null) {
         setState(() {
@@ -135,14 +179,11 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
         return;
       }
 
-      // Il faut mon propre nom d'utilisateur pour identifier l'expediteur.
-      final myProfile = ref.read(userProfileProvider).value;
-      final myUsername = myProfile?.username;
-      if (myUsername == null || myUsername.isEmpty) {
+      if (myUsername.isEmpty) {
         setState(() {
           _saving = false;
           _error =
-              'Choisis d\'abord ton nom d\'utilisateur dans ton profil pour te connecter.';
+              'Ton nom d\'utilisateur n\'est pas encore pret. Reessaie dans un instant.';
         });
         return;
       }
@@ -158,39 +199,23 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
         return;
       }
 
-      if (targetUid != null) {
-        // Compte trouve -> demande de connexion a accepter.
-        final requestId =
-            await ref.read(connectionsRepositoryProvider).sendRequest(
-                  fromUid: user.uid,
-                  fromUsername: myUsername,
-                  fromDisplayName: myProfile?.displayName ?? myUsername,
-                  toUid: targetUid,
-                  toUsername: normalizeUsername(usernameInput),
-                  personName: name,
-                );
-        await peopleRepo.add(
-          user.uid,
-          name: name,
-          note: note,
-          emoji: _emoji,
-          color: _color,
-          linkedUid: targetUid,
-          linkedUsername: usernameInput,
-          requestId: requestId,
-          linkStatus: 'pending',
-        );
-        navigator.pop();
-        messenger.showSnackBar(
-          SnackBar(content: Text('Demande envoyee a @$usernameInput 💌')),
-        );
+      if (targetUid == null) {
+        // Compte inexistant -> erreur (pas d'invitation dans ce cas).
+        setState(() {
+          _saving = false;
+          _error = 'Le compte @$usernameInput n\'existe pas. '
+              'Laisse le champ vide pour envoyer une invitation.';
+        });
         return;
       }
 
-      // Compte introuvable -> invitation par lien.
-      final link = await ref.read(connectionsRepositoryProvider).createInvitation(
+      // Compte trouve -> demande de connexion a accepter.
+      final requestId = await ref.read(connectionsRepositoryProvider).sendRequest(
             fromUid: user.uid,
             fromUsername: myUsername,
+            fromDisplayName: myProfile?.displayName ?? myUsername,
+            toUid: targetUid,
+            toUsername: normalizeUsername(usernameInput),
             personName: name,
           );
       await peopleRepo.add(
@@ -199,16 +224,14 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
         note: note,
         emoji: _emoji,
         color: _color,
+        linkedUid: targetUid,
         linkedUsername: usernameInput,
-        linkStatus: 'invited',
+        requestId: requestId,
+        linkStatus: 'pending',
       );
       navigator.pop();
-      // Ouvre la feuille de partage native (WhatsApp, SMS, mail...).
-      await SharePlus.instance.share(
-        ShareParams(
-          text: 'Rejoins-moi sur Cœur à cœur 💗 : $link',
-          subject: 'Une invitation pleine d\'amour',
-        ),
+      messenger.showSnackBar(
+        SnackBar(content: Text('Demande envoyee a @$usernameInput 💌')),
       );
     } catch (e) {
       if (mounted) {
@@ -291,8 +314,8 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
                     prefixIcon: Icon(Icons.link),
                     helperMaxLines: 3,
                     helperText:
-                        'Si le compte existe, une demande de connexion est envoyee. '
-                        'Sinon, tu pourras partager un lien d\'invitation.',
+                        'Rempli : une demande de connexion est envoyee (le compte '
+                        'doit exister). Vide : tu partages un lien d\'invitation.',
                   ),
                 ),
               ],

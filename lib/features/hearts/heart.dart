@@ -9,6 +9,7 @@ class Heart {
     required this.toUid,
     required this.count,
     required this.seen,
+    this.message = '',
     this.createdAt,
   });
 
@@ -18,6 +19,7 @@ class Heart {
   final String toUid;
   final int count;
   final bool seen;
+  final String message;
   final DateTime? createdAt;
 
   factory Heart.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -29,6 +31,7 @@ class Heart {
       toUid: (map['toUid'] as String?) ?? '',
       count: (map['count'] as num?)?.toInt() ?? 0,
       seen: (map['seen'] as bool?) ?? false,
+      message: (map['message'] as String?) ?? '',
       createdAt: (map['createdAt'] as Timestamp?)?.toDate(),
     );
   }

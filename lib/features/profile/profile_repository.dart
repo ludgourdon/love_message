@@ -15,6 +15,12 @@ class ProfileRepository {
         (snap) => snap.exists ? UserProfile.fromMap(uid, snap.data()!) : null,
       );
 
+  /// Lecture ponctuelle du profil (fiable meme si le stream n'est pas actif).
+  Future<UserProfile?> fetchProfile(String uid) async {
+    final snap = await _doc(uid).get();
+    return snap.exists ? UserProfile.fromMap(uid, snap.data()!) : null;
+  }
+
   Future<void> updateDisplayName(String uid, String displayName) async {
     final name = displayName.trim();
     await _doc(uid).set({'displayName': name}, SetOptions(merge: true));

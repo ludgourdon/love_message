@@ -3,10 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme.dart';
 import '../auth/auth_providers.dart';
-import '../connections/connection_providers.dart';
-import '../connections/username.dart';
 import 'profile_providers.dart';
-import 'user_profile.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -69,12 +66,11 @@ class ProfileScreen extends ConsumerWidget {
                   leading: const Icon(Icons.alternate_email, color: kPink),
                   title: const Text('Nom d\'utilisateur'),
                   subtitle: Text(
-                    username != null
-                        ? '@$username'
-                        : 'Non defini — choisis-en un pour te connecter',
+                    username != null ? '@$username' : 'Attribution en cours…',
                   ),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => _editUsername(context, ref, profile),
+                  trailing: const Icon(Icons.lock_outline),
+                  // Identifiant attribue automatiquement : non modifiable.
+                  onTap: null,
                 ),
               ),
               const SizedBox(height: 8),
@@ -136,81 +132,6 @@ class ProfileScreen extends ConsumerWidget {
     if (context.mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Pseudo mis a jour ✨')));
-    }
-  }
-
-  Future<void> _editUsername(
-      BuildContext context, WidgetRef ref, UserProfile? profile) async {
-    final controller = TextEditingController(text: profile?.username ?? '');
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Nom d\'utilisateur'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                prefixText: '@',
-                hintText: 'ton_pseudo',
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Unique. C\'est ce que tes proches saisiront pour te connecter.',
-              style: TextStyle(fontSize: 12),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: kPink),
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('Enregistrer'),
-          ),
-        ],
-      ),
-    );
-    if (result == null || result.isEmpty) return;
-    final err = validateUsername(result);
-    if (err != null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(err)));
-      }
-      return;
-    }
-    final user = ref.read(authStateProvider).value;
-    if (user == null) return;
-    try {
-      await ref.read(directoryRepositoryProvider).claimUsername(
-            uid: user.uid,
-            username: result,
-            previousUsernameLower: profile?.usernameLower,
-          );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Nom d\'utilisateur enregistre : @$result')),
-        );
-      }
-    } on UsernameTakenException {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ce nom d\'utilisateur est deja pris.')),
-        );
-      }
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Echec de l\'enregistrement. Reessaie.')),
-        );
-      }
     }
   }
 }

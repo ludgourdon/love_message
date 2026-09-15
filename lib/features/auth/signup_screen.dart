@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../theme.dart';
 import 'auth_errors.dart';
+import '../connections/connection_providers.dart';
 import 'auth_providers.dart';
 
 class SignupScreen extends ConsumerStatefulWidget {
@@ -35,16 +36,29 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    // Capture avant tout await : la redirection go_router detruit cet ecran
+    // des la creation du compte, donc `ref` ne serait plus utilisable ensuite.
+    final auth = ref.read(authRepositoryProvider);
+    final directory = ref.read(directoryRepositoryProvider);
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      await ref.read(authRepositoryProvider).register(
+      await auth.register(
             email: _email.text,
             password: _password.text,
             displayName: _name.text,
           );
+      // Attribue automatiquement un nom d'utilisateur unique.
+      final user = auth.currentUser;
+      if (user != null) {
+        await directory.ensureUsername(
+              uid: user.uid,
+              displayName: _name.text,
+              email: user.email,
+            );
+      }
       // La redirection go_router s'occupe de la navigation vers l'accueil.
     } on FirebaseAuthException catch (e) {
       setState(() => _error = authErrorMessage(e));

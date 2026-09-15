@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -13,6 +14,13 @@ import '../people/person_editor.dart';
 import '../hearts/heart.dart';
 import '../hearts/hearts_providers.dart';
 import '../profile/profile_providers.dart';
+
+const _kLittleWords = <String>[
+  'Je pense à toi 🌸',
+  'Tu es mon petit soleil ☀️',
+  'Un gros câlin 🧸',
+  'Juste parce que je t’aime 💗',
+];
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -42,7 +50,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
     final pages = <Widget>[
       WorldPage(onChoose: _openSend),
-      const LittleWordsPage(),
       const ReceivePage(),
     ];
     return Scaffold(
@@ -55,12 +62,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               padding: const EdgeInsets.fromLTRB(20, 18, 8, 8),
               child: Row(
                 children: [
-                  const Flexible(
-                    child: Text(
-                      'Cœur à cœur',
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-                    ),
+                  Image.asset(
+                    'assets/icon/header_logo.png',
+                    height: 68,
                   ),
                   const Spacer(),
                   TextButton.icon(
@@ -119,11 +123,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             selectedIcon: Icon(Icons.people_alt),
             label: 'Mon monde',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
-            label: 'Petits mots',
-          ),
           NavigationDestination(
             icon: Badge.count(
               count: unseenHearts,
@@ -147,7 +146,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     setState(() => _tab = value);
     // On marque les coeurs comme vus en QUITTANT l'onglet Recevoir : ils
     // restent affiches pendant la consultation, puis disparaissent ensuite.
-    if (previous == 2 && value != 2) {
+    if (previous == 1 && value != 1) {
       final uid = ref.read(authStateProvider).value?.uid;
       if (uid != null) {
         _markSeen(uid);
@@ -295,7 +294,17 @@ class WorldPage extends ConsumerWidget {
                   _PersonCard(
                     person: person,
                     status: _statusFor(person, statusByRequest),
-                    onTap: () => onChoose(person),
+                    onTap: () {
+                      if (person.linkStatus == 'invited') {
+                        final uid = ref.read(authStateProvider).value?.uid;
+                        if (uid != null) {
+                          reshareInvitation(ref,
+                              uid: uid, personName: person.name);
+                        }
+                      } else {
+                        onChoose(person);
+                      }
+                    },
                     onEdit: () =>
                         showPersonEditor(context, ref, existing: person),
                     onDelete: () => _confirmDelete(context, ref, person),
@@ -469,8 +478,10 @@ class SendLovePage extends ConsumerStatefulWidget {
 class _SendLovePageState extends ConsumerState<SendLovePage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  final _message = TextEditingController();
   var _count = 0;
   bool _sending = false;
+
   @override
   void initState() {
     super.initState();
@@ -483,6 +494,7 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
   @override
   void dispose() {
     _controller.dispose();
+    _message.dispose();
     super.dispose();
   }
 
@@ -491,17 +503,22 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
     _controller.forward(from: 0);
   }
 
+  void _pickWord(String word) {
+    setState(() {
+      _message.text = word;
+      _message.selection = TextSelection.collapsed(offset: word.length);
+    });
+  }
+
   Future<void> _confirmSend() async {
     final person = widget.person;
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
     final s = _count > 1 ? 's' : '';
+    final message = _message.text.trim();
 
     final linkedUid = person.linkedUid;
 
-    // La connexion est effective si :
-    //  - cote accepteur : la carte est stockee en 'accepted' ;
-    //  - cote expediteur : la demande envoyee est passee a 'accepted'.
     var connected = false;
     if (linkedUid != null) {
       if (person.linkStatus == 'accepted') {
@@ -513,7 +530,6 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
       }
     }
 
-    // Proche connecte -> envoi reel des coeurs.
     if (linkedUid != null && connected) {
       final me = ref.read(authStateProvider).value;
       if (me == null) return;
@@ -532,6 +548,7 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
               fromName: myName,
               toUid: linkedUid,
               count: _count,
+              message: message,
             );
         navigator.pop();
         messenger.showSnackBar(
@@ -546,7 +563,6 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
       return;
     }
 
-    // Proche relie mais pas encore accepte.
     if (linkedUid != null) {
       messenger.showSnackBar(
         const SnackBar(
@@ -558,153 +574,159 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
       return;
     }
 
-    // Proche local (pas de compte connecte) -> celebration locale.
     _sent(context, _count, person.name);
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
         child: Column(
           children: [
-            Row(
-              children: [
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back_rounded),
-                ),
-                const Spacer(),
-                Text(
-                  'Pour ${widget.person.name}',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.arrow_back_rounded),
                   ),
-                ),
-                const Spacer(),
-                const SizedBox(width: 48),
-              ],
+                  const Spacer(),
+                  Text(
+                    'Pour ${widget.person.name}',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  const SizedBox(width: 48),
+                ],
+              ),
             ),
-            const Spacer(),
-            Text(
-              _count == 0
-                  ? 'Appuie pour envoyer de l’amour'
-                  : 'Encore un peu d’amour !',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 28),
-            GestureDetector(
-              onTap: _sendHeart,
-              child: AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) => Transform.scale(
-                  scale: 1 + math.sin(_controller.value * math.pi) * .12,
-                  child: child,
-                ),
-                child: Container(
-                  width: 230,
-                  height: 230,
-                  decoration: BoxDecoration(
-                    color: kPink,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: kPink.withValues(alpha: .35),
-                        blurRadius: 28,
-                        spreadRadius: 8,
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 8),
+                    Text(
+                      _count == 0
+                          ? 'Appuie pour envoyer de l’amour'
+                          : 'Encore un peu d’amour !',
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 24),
+                    GestureDetector(
+                      onTap: _sendHeart,
+                      child: AnimatedBuilder(
+                        animation: _controller,
+                        builder: (context, child) => Transform.scale(
+                          scale: 1 + math.sin(_controller.value * math.pi) * .12,
+                          child: child,
+                        ),
+                        child: Container(
+                          width: 200,
+                          height: 200,
+                          decoration: BoxDecoration(
+                            color: kPink,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: kPink.withValues(alpha: .35),
+                                blurRadius: 28,
+                                spreadRadius: 8,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            Icons.favorite_rounded,
+                            color: Colors.white,
+                            size: 120,
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.favorite_rounded,
-                    color: Colors.white,
-                    size: 142,
-                  ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      '💗 × $_count',
+                      style: const TextStyle(
+                          fontSize: 30, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text('Chaque appui prépare un cœur pour ton proche.'),
+                    const SizedBox(height: 24),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Ajouter un petit mot (facultatif)',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final word in _kLittleWords)
+                          ChoiceChip(
+                            label: Text(word),
+                            selected: _message.text == word,
+                            selectedColor: kPink.withValues(alpha: .2),
+                            onSelected: (_) => _pickWord(word),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _message,
+                      textCapitalization: TextCapitalization.sentences,
+                      inputFormatters: [LengthLimitingTextInputFormatter(26)],
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(
+                        hintText: 'Ton petit mot…',
+                        prefixIcon: Icon(Icons.mode_edit_outline),
+                        border: OutlineInputBorder(),
+                        helperText: '26 caractères max en saisie libre',
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 28),
-            Text(
-              '💗 × $_count',
-              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            const Text('Chaque appui prépare un cœur pour ton proche.'),
-            const Spacer(),
-            FilledButton.icon(
-              onPressed: (_count == 0 || _sending) ? null : _confirmSend,
-              icon: _sending
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.send_rounded),
-              label: Text(
-                _sending
-                    ? 'Envoi...'
-                    : (_count == 0
-                        ? 'Envoie quelques cœurs'
-                        : 'Envoyer $_count cœur${_count > 1 ? 's' : ''}'),
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: kPink,
-                minimumSize: const Size.fromHeight(56),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              child: FilledButton.icon(
+                onPressed: (_count == 0 || _sending) ? null : _confirmSend,
+                icon: _sending
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.send_rounded),
+                label: Text(
+                  _sending
+                      ? 'Envoi...'
+                      : (_count == 0
+                          ? 'Envoie quelques cœurs'
+                          : 'Envoyer $_count cœur${_count > 1 ? 's' : ''}'),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: kPink,
+                  minimumSize: const Size.fromHeight(56),
+                ),
               ),
             ),
           ],
         ),
       ),
-    ),
-  );
-}
-
-class LittleWordsPage extends StatelessWidget {
-  const LittleWordsPage({super.key});
-  static const _words = [
-    'Je pense à toi 🌸',
-    'Tu es mon petit soleil ☀️',
-    'Un gros câlin 🧸',
-    'Juste parce que je t’aime 💗',
-  ];
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-    children: [
-      const Text(
-        'Les petits mots',
-        style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800),
-      ),
-      const SizedBox(height: 8),
-      const Text('Choisis un petit message à glisser avec tes cœurs.'),
-      const SizedBox(height: 24),
-      for (final word in _words) ...[
-        Card(
-          color: Colors.white,
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 18,
-              vertical: 8,
-            ),
-            title: Text(
-              word,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            trailing: const Icon(Icons.arrow_forward_rounded, color: kPink),
-            onTap: () => ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('Petit mot choisi : $word'))),
-          ),
-        ),
-        const SizedBox(height: 10),
-      ],
-    ],
-  );
+    );
+  }
 }
 
 class ReceivePage extends ConsumerWidget {
@@ -723,7 +745,7 @@ class ReceivePage extends ConsumerWidget {
               textAlign: TextAlign.center),
         ),
       ),
-      data: (all) => _content(all.where((h) => !h.seen).toList()),
+      data: (all) => _content(all),
     );
   }
 
@@ -771,13 +793,19 @@ class ReceivePage extends ConsumerWidget {
                   style: const TextStyle(
                       fontSize: 40, fontWeight: FontWeight.w800)),
               Text(
-                'nouveau${total > 1 ? 'x' : ''} cœur${total > 1 ? 's' : ''} 💗',
+                'cœur${total > 1 ? 's' : ''} reçu${total > 1 ? 's' : ''} en tout',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ],
           ),
         ),
         const SizedBox(height: 24),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Tes cœurs reçus',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        ),
+        const SizedBox(height: 12),
         for (final h in hearts) ...[
           _HeartTile(heart: h),
           const SizedBox(height: 10),
@@ -785,6 +813,12 @@ class ReceivePage extends ConsumerWidget {
       ],
     );
   }
+}
+
+String _heartDateLabel(DateTime dt) {
+  final d = dt.toLocal();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return 'le ${two(d.day)}/${two(d.month)}/${d.year} à ${two(d.hour)}h${two(d.minute)}';
 }
 
 class _HeartTile extends StatelessWidget {
@@ -801,35 +835,61 @@ class _HeartTile extends StatelessWidget {
         width: 1.5,
       ),
     ),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('💌', style: TextStyle(fontSize: 28)),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(heart.fromName,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w800, fontSize: 16)),
-              const SizedBox(height: 2),
-              Text('t’envoie ${heart.count} cœur${heart.count > 1 ? 's' : ''} 💗'),
-            ],
-          ),
+        Row(
+          children: [
+            if (!heart.seen)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: kPink,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text('nouveau',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700)),
+              ),
+            const Spacer(),
+            if (heart.createdAt != null)
+              Text(
+                _heartDateLabel(heart.createdAt!),
+                style: const TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+          ],
         ),
-        if (!heart.seen)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: kPink,
-              borderRadius: BorderRadius.circular(12),
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('💌', style: TextStyle(fontSize: 28)),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(heart.fromName,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 16)),
+                  const SizedBox(height: 2),
+                  Text(
+                      't\u2019envoie ${heart.count} c\u0153ur${heart.count > 1 ? 's' : ''} \ud83d\udc97'),
+                  if (heart.message.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '\u00ab ${heart.message} \u00bb',
+                      style: const TextStyle(
+                          fontStyle: FontStyle.italic, color: kInk),
+                    ),
+                  ],
+                ],
+              ),
             ),
-            child: const Text('nouveau',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700)),
-          ),
+          ],
+        ),
       ],
     ),
   );
