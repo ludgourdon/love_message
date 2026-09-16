@@ -95,14 +95,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('💗', style: TextStyle(fontSize: 64), textAlign: TextAlign.center),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Cœur à cœur',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Image.asset('assets/icon/header_wordmark.png', height: 48),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 14),
                   const Text(
                     'Connecte-toi pour retrouver ton petit monde.',
                     textAlign: TextAlign.center,

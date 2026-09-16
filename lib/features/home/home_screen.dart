@@ -63,8 +63,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Row(
                 children: [
                   Image.asset(
-                    'assets/icon/header_logo.png',
-                    height: 68,
+                    'assets/icon/header_wordmark.png',
+                    height: 30,
                   ),
                   const Spacer(),
                   TextButton.icon(
