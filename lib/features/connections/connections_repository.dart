@@ -96,9 +96,193 @@ class ConnectionsRepository {
     return 'https://love-message-2835b.web.app/invite?code=$code';
   }
 
+  /// Cote INVITE : utilise un code d'invitation. N'ecrit QUE dans mes
+  /// propres donnees + met a jour l'invitation. L'invitant se reconcilie
+  /// ensuite tout seul (voir watchRedeemedInvitations / reconcileInvitation).
+  Future<InvitationResult> redeemInvitation({
+    required String code,
+    required String myUid,
+    required String myUsername,
+    required String myDisplayName,
+  }) async {
+    final cleaned = code.trim().toLowerCase();
+    if (cleaned.isEmpty) {
+      throw const InvitationException('Entre un code d\'invitation.');
+    }
+    final invSnap = await _invitations.doc(cleaned).get();
+    if (!invSnap.exists) {
+      throw const InvitationException(
+          'Ce code d\'invitation est invalide ou a expire.');
+    }
+    final data = invSnap.data() ?? const <String, dynamic>{};
+    final fromUid = data['fromUid'] as String?;
+    final fromUsername = (data['fromUsername'] as String?) ?? '';
+    if (fromUid == null || fromUid.isEmpty) {
+      throw const InvitationException('Invitation invalide.');
+    }
+    if (fromUid == myUid) {
+      throw const InvitationException(
+          'Tu ne peux pas utiliser ta propre invitation.');
+    }
+
+    final myPeople =
+        _firestore.collection('users').doc(myUid).collection('people');
+    final inviterName = fromUsername.isNotEmpty ? '@$fromUsername' : 'ton invitant';
+
+    // Deja connecte ? (evite les doublons si on retape le code)
+    final already =
+        await myPeople.where('linkedUid', isEqualTo: fromUid).limit(1).get();
+    if (already.docs.isNotEmpty) {
+      throw InvitationException('Tu es deja connecte a $inviterName.');
+    }
+
+    final batch = _firestore.batch();
+    // 1) L'invitant apparait dans MON monde (connecte).
+    batch.set(myPeople.doc(), {
+      'name': inviterName,
+      'note': '',
+      'emoji': '💗',
+      'color': 0xFFFFD4E2,
+      'linkedUid': fromUid,
+      'linkedUsername': fromUsername,
+      'linkStatus': 'accepted',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    // 2) Marque l'invitation acceptee + mes infos, pour que l'invitant se
+    //    reconcilie de son cote (il ne peut lire mon profil).
+    batch.update(_invitations.doc(cleaned), {
+      'status': 'accepted',
+      'toUid': myUid,
+      'toUsername': myUsername,
+      'toDisplayName': myDisplayName,
+      'reconciled': false,
+      'acceptedAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+    return InvitationResult(inviterName: inviterName);
+  }
+
+  /// Cote INVITANT : invitations que j'ai envoyees et qui ont ete acceptees
+  /// mais pas encore integrees dans mon monde. Filtre cote client pour eviter
+  /// un index compose.
+  Stream<List<RedeemedInvitation>> watchRedeemedInvitations(String myUid) =>
+      _invitations.where('fromUid', isEqualTo: myUid).snapshots().map((snap) =>
+          snap.docs
+              .where((d) {
+                final m = d.data();
+                return m['status'] == 'accepted' &&
+                    m['reconciled'] != true &&
+                    (m['toUid'] as String?) != null &&
+                    (m['toUid'] as String).isNotEmpty;
+              })
+              .map(RedeemedInvitation.fromDoc)
+              .toList());
+
+  /// Cote INVITANT : integre l'invite dans mon monde (ecrit dans MES donnees
+  /// uniquement) et marque l'invitation comme reconciliee. Idempotent.
+  Future<void> reconcileInvitation(RedeemedInvitation inv, String myUid) async {
+    final myPeople =
+        _firestore.collection('users').doc(myUid).collection('people');
+
+    final batch = _firestore.batch();
+
+    // Deja integre ?
+    final existing =
+        await myPeople.where('linkedUid', isEqualTo: inv.toUid).limit(1).get();
+    if (existing.docs.isEmpty) {
+      // Retrouve la carte "invited" a mettre a jour : par code, sinon par nom.
+      DocumentReference<Map<String, dynamic>>? cardRef;
+      if (inv.code.isNotEmpty) {
+        final byCode =
+            await myPeople.where('inviteCode', isEqualTo: inv.code).limit(1).get();
+        if (byCode.docs.isNotEmpty) cardRef = byCode.docs.first.reference;
+      }
+      if (cardRef == null && inv.personName.isNotEmpty) {
+        final invited =
+            await myPeople.where('linkStatus', isEqualTo: 'invited').get();
+        for (final d in invited.docs) {
+          if (((d.data()['name'] as String?) ?? '').trim() ==
+              inv.personName.trim()) {
+            cardRef = d.reference;
+            break;
+          }
+        }
+      }
+      final name = inv.toDisplayName.trim().isNotEmpty
+          ? inv.toDisplayName.trim()
+          : (inv.toUsername.isNotEmpty ? '@${inv.toUsername}' : 'Nouveau proche');
+      if (cardRef != null) {
+        batch.update(cardRef, {
+          'name': name,
+          'linkedUid': inv.toUid,
+          'linkedUsername': inv.toUsername,
+          'linkStatus': 'accepted',
+        });
+      } else {
+        batch.set(myPeople.doc(), {
+          'name': name,
+          'note': '',
+          'emoji': '💗',
+          'color': 0xFFFFD4E2,
+          'linkedUid': inv.toUid,
+          'linkedUsername': inv.toUsername,
+          'linkStatus': 'accepted',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
+
+    batch.update(_invitations.doc(inv.code), {'reconciled': true});
+    await batch.commit();
+  }
+
   String _randomCode() {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     final rand = Random.secure();
     return List.generate(8, (_) => chars[rand.nextInt(chars.length)]).join();
   }
+}
+
+/// Resultat d'une connexion par code d'invitation.
+class InvitationResult {
+  const InvitationResult({required this.inviterName});
+  final String inviterName;
+}
+
+/// Invitation acceptee par un invite, vue du cote de l'invitant.
+class RedeemedInvitation {
+  const RedeemedInvitation({
+    required this.code,
+    required this.toUid,
+    required this.toUsername,
+    required this.toDisplayName,
+    required this.personName,
+  });
+
+  final String code;
+  final String toUid;
+  final String toUsername;
+  final String toDisplayName;
+  final String personName;
+
+  factory RedeemedInvitation.fromDoc(
+      DocumentSnapshot<Map<String, dynamic>> doc) {
+    final m = doc.data() ?? const <String, dynamic>{};
+    return RedeemedInvitation(
+      code: (m['code'] as String?) ?? doc.id,
+      toUid: (m['toUid'] as String?) ?? '',
+      toUsername: (m['toUsername'] as String?) ?? '',
+      toDisplayName: (m['toDisplayName'] as String?) ?? '',
+      personName: (m['personName'] as String?) ?? '',
+    );
+  }
+}
+
+/// Erreur "attendue" lors de l'utilisation d'un code d'invitation
+/// (code invalide, deja connecte, etc.), a afficher telle quelle.
+class InvitationException implements Exception {
+  const InvitationException(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }

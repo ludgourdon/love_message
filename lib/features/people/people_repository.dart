@@ -36,6 +36,7 @@ class PeopleRepository {
     String? linkedUsername,
     String? requestId,
     String linkStatus = 'none',
+    String? inviteCode,
   }) {
     return _col(uid).add({
       'name': name.trim(),
@@ -46,6 +47,7 @@ class PeopleRepository {
       'linkedUsername': linkedUsername,
       'requestId': requestId,
       'linkStatus': linkStatus,
+      'inviteCode': inviteCode,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }

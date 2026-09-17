@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Beta : tout utilisateur authentifié peut lire/écrire.
+    // À resserrer avant une mise en production publique.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

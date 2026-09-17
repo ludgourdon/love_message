@@ -29,3 +29,13 @@ final outgoingRequestsProvider =
   if (user == null) return Stream<List<ConnectionRequest>>.value(const []);
   return ref.watch(connectionsRepositoryProvider).watchOutgoing(user.uid);
 });
+
+/// Cote INVITANT : invitations acceptees par un invite, a integrer.
+final redeemedInvitationsProvider =
+    StreamProvider<List<RedeemedInvitation>>((ref) {
+  final user = ref.watch(authStateProvider).value;
+  if (user == null) {
+    return Stream<List<RedeemedInvitation>>.value(const []);
+  }
+  return ref.watch(connectionsRepositoryProvider).watchRedeemedInvitations(user.uid);
+});

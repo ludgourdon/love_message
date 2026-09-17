@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
 import 'features/connections/incoming_requests_screen.dart';
+import 'features/connections/redeem_invite_screen.dart';
 import 'features/home/home_screen.dart';
 import 'features/profile/profile_screen.dart';
 
@@ -30,6 +31,10 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/requests',
       builder: (context, state) => const IncomingRequestsScreen(),
+    ),
+    GoRoute(
+      path: '/redeem',
+      builder: (context, state) => const RedeemInviteScreen(),
     ),
   ],
 );

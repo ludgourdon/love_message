@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../theme.dart';
 import '../auth/auth_providers.dart';
@@ -81,6 +82,17 @@ class ProfileScreen extends ConsumerWidget {
                   title: const Text('Modifier mon pseudo'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => _editName(context, ref, name),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                color: Colors.white,
+                child: ListTile(
+                  leading: const Icon(Icons.card_giftcard_rounded, color: kPink),
+                  title: const Text('J\'ai un code d\'invitation'),
+                  subtitle: const Text('Me connecter a la personne qui m\'a invite'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => context.push('/redeem'),
                 ),
               ),
               const SizedBox(height: 8),

@@ -14,6 +14,7 @@ class LovedOne {
     this.linkedUsername,
     this.requestId,
     this.linkStatus = 'none',
+    this.inviteCode,
   });
 
   final String id;
@@ -27,6 +28,9 @@ class LovedOne {
   final String? linkedUid;
   final String? linkedUsername;
   final String? requestId;
+
+  /// Code d'invitation associe a une carte "invited" (pour la connexion).
+  final String? inviteCode;
 
   /// none | pending | invited (le statut "accepted" est derive des demandes).
   final String linkStatus;
@@ -44,6 +48,7 @@ class LovedOne {
       linkedUsername: map['linkedUsername'] as String?,
       requestId: map['requestId'] as String?,
       linkStatus: (map['linkStatus'] as String?) ?? 'none',
+      inviteCode: map['inviteCode'] as String?,
     );
   }
 }

@@ -55,10 +55,13 @@ Future<void> reshareInvitation(
     fromUsername: myProfile?.username ?? '',
     personName: personName,
   );
+  final code = Uri.tryParse(link)?.queryParameters['code'] ?? link;
   await SharePlus.instance.share(
     ShareParams(
-      text: '$personName n\'a pas encore de compte, invites le !\n'
-          'Rejoins-moi sur Cœur à cœur 💗 : $link',
+      text: 'Coucou c\'est ${myProfile?.displayName ?? 'Un ami'}, '
+          'rejoins-moi sur Cœur à cœur 💗 !\n'
+          'Installe l\'appli, ouvre « J\'ai un code d\'invitation » et entre '
+          'ce code : $code',
       subject: 'Invitation Cœur à cœur',
     ),
   );
@@ -150,6 +153,7 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
                   fromUsername: myUsername,
                   personName: name,
                 );
+        final inviteCode = Uri.tryParse(link)?.queryParameters['code'];
         await peopleRepo.add(
           user.uid,
           name: name,
@@ -157,12 +161,15 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
           emoji: _emoji,
           color: _color,
           linkStatus: 'invited',
+          inviteCode: inviteCode,
         );
         navigator.pop();
         await SharePlus.instance.share(
           ShareParams(
-            text: '$name n\'a pas encore de compte, invites le !\n'
-                'Rejoins-moi sur Cœur à cœur 💗 : $link',
+            text: 'Coucou c\'est ${myProfile?.displayName ?? 'Un ami'}, '
+                'rejoins-moi sur Cœur à cœur 💗 !\n'
+                'Installe l\'appli, ouvre « J\'ai un code d\'invitation » et '
+                'entre ce code : ${inviteCode ?? link}',
             subject: 'Invitation Cœur à cœur',
           ),
         );

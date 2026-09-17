@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../theme.dart';
 import '../auth/auth_providers.dart';
 import '../connections/connection_providers.dart';
+import '../connections/connections_repository.dart';
 import '../people/loved_one.dart';
 import '../people/people_providers.dart';
 import '../people/person_editor.dart';
@@ -34,6 +35,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _celebrationSeq = 0;
   String? _heartsUid;
   final Set<String> _animatedHeartIds = <String>{};
+  final Set<String> _reconciling = <String>{};
   @override
   Widget build(BuildContext context) {
     final incomingCount =
@@ -47,6 +49,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ref.listen<AsyncValue<List<Heart>>>(
       receivedHeartsProvider,
       _onHeartsReceived,
+    );
+    ref.listen<AsyncValue<List<RedeemedInvitation>>>(
+      redeemedInvitationsProvider,
+      (prev, next) => _onRedeemedInvitations(next),
     );
     final pages = <Widget>[
       WorldPage(onChoose: _openSend),
@@ -64,7 +70,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 children: [
                   Image.asset(
                     'assets/icon/header_wordmark.png',
-                    height: 30,
+                    height: 26,
                   ),
                   const Spacer(),
                   TextButton.icon(
@@ -163,6 +169,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           SnackBar(content: Text('Marquage "vus" echoue : $e')),
         );
       }
+    }
+  }
+
+  // Cote invitant : integre automatiquement les invites qui ont accepte.
+  void _onRedeemedInvitations(AsyncValue<List<RedeemedInvitation>> value) {
+    final list = value.value;
+    final uid = ref.read(authStateProvider).value?.uid;
+    if (list == null || uid == null) return;
+    final repo = ref.read(connectionsRepositoryProvider);
+    for (final inv in list) {
+      if (_reconciling.contains(inv.code)) continue;
+      _reconciling.add(inv.code);
+      repo.reconcileInvitation(inv, uid).catchError((_) {
+        // Un echec sera retente au prochain snapshot.
+      }).whenComplete(() => _reconciling.remove(inv.code));
     }
   }
 
@@ -321,6 +342,13 @@ class WorldPage extends ConsumerWidget {
           icon: const Icon(Icons.person_add_alt_1_rounded),
           label: const Text('Ajouter quelqu’un'),
           style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+        ),
+        const SizedBox(height: 4),
+        TextButton.icon(
+          onPressed: () => context.push('/redeem'),
+          icon: const Icon(Icons.card_giftcard_rounded, size: 18),
+          label: const Text('J’ai un code d’invitation'),
+          style: TextButton.styleFrom(foregroundColor: kPink),
         ),
       ],
     );
