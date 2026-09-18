@@ -52,6 +52,14 @@ class PeopleRepository {
     });
   }
 
+  /// Renvoie le proche relie au compte [linkedUid], s'il existe deja.
+  Future<LovedOne?> findByLinkedUid(String uid, String linkedUid) async {
+    final snap =
+        await _col(uid).where('linkedUid', isEqualTo: linkedUid).limit(1).get();
+    if (snap.docs.isEmpty) return null;
+    return LovedOne.fromDoc(snap.docs.first);
+  }
+
   Future<void> update(
     String uid,
     String id, {

@@ -12,6 +12,7 @@ import '../connections/connections_repository.dart';
 import '../people/loved_one.dart';
 import '../people/people_providers.dart';
 import '../people/person_editor.dart';
+import '../blocks/blocks_providers.dart';
 import '../hearts/heart.dart';
 import '../hearts/hearts_providers.dart';
 import '../profile/profile_providers.dart';
@@ -278,6 +279,63 @@ class WorldPage extends ConsumerWidget {
     }
   }
 
+  Future<void> _confirmBlock(
+    BuildContext context,
+    WidgetRef ref,
+    LovedOne person,
+  ) async {
+    final user = ref.read(authStateProvider).value;
+    final blockedUid = person.linkedUid;
+    if (user == null || blockedUid == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Bloquer ${person.name} ?'),
+        content: Text(
+          '${person.name} ne pourra plus t\'envoyer de cœurs. '
+          'Tu pourras le débloquer à tout moment.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Bloquer'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await ref
+          .read(blocksRepositoryProvider)
+          .block(user.uid, blockedUid, name: person.name);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${person.name} a été bloqué.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _unblock(
+    BuildContext context,
+    WidgetRef ref,
+    LovedOne person,
+  ) async {
+    final user = ref.read(authStateProvider).value;
+    final blockedUid = person.linkedUid;
+    if (user == null || blockedUid == null) return;
+    await ref.read(blocksRepositoryProvider).unblock(user.uid, blockedUid);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${person.name} a été débloqué 💗')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final peopleAsync = ref.watch(peopleProvider);
@@ -285,6 +343,7 @@ class WorldPage extends ConsumerWidget {
     final statusByRequest = <String, String>{
       for (final r in outgoing) r.id: r.status,
     };
+    final blocked = ref.watch(blockedUidsProvider).value ?? const <String>{};
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
       children: [
@@ -315,6 +374,8 @@ class WorldPage extends ConsumerWidget {
                   _PersonCard(
                     person: person,
                     status: _statusFor(person, statusByRequest),
+                    blocked: person.linkedUid != null &&
+                        blocked.contains(person.linkedUid),
                     onTap: () {
                       if (person.linkStatus == 'invited') {
                         final uid = ref.read(authStateProvider).value?.uid;
@@ -329,6 +390,12 @@ class WorldPage extends ConsumerWidget {
                     onEdit: () =>
                         showPersonEditor(context, ref, existing: person),
                     onDelete: () => _confirmDelete(context, ref, person),
+                    onBlock: person.linkedUid == null
+                        ? null
+                        : () => _confirmBlock(context, ref, person),
+                    onUnblock: person.linkedUid == null
+                        ? null
+                        : () => _unblock(context, ref, person),
                   ),
                   const SizedBox(height: 14),
                 ],
@@ -390,12 +457,18 @@ class _PersonCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     this.status,
+    this.blocked = false,
+    this.onBlock,
+    this.onUnblock,
   });
   final LovedOne person;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final (String, Color)? status;
+  final bool blocked;
+  final VoidCallback? onBlock;
+  final VoidCallback? onUnblock;
 
   void _showMenu(BuildContext context) => showModalBottomSheet<void>(
     context: context,
@@ -411,6 +484,22 @@ class _PersonCard extends StatelessWidget {
               onEdit();
             },
           ),
+          if (onBlock != null || onUnblock != null)
+            ListTile(
+              leading: Icon(
+                blocked ? Icons.lock_open_rounded : Icons.block_rounded,
+                color: blocked ? const Color(0xFF2E9E6B) : Colors.redAccent,
+              ),
+              title: Text(blocked ? 'Débloquer' : 'Bloquer'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                if (blocked) {
+                  onUnblock?.call();
+                } else {
+                  onBlock?.call();
+                }
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.delete_outline, color: kPink),
             title: const Text('Supprimer'),
@@ -459,7 +548,27 @@ class _PersonCard extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(person.note),
                     ],
-                    if (statusData != null) ...[
+                    if (blocked) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withValues(alpha: .12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          'Bloqué 🚫',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.redAccent,
+                          ),
+                        ),
+                      ),
+                    ] else if (statusData != null) ...[
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -584,8 +693,13 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
         );
       } catch (e) {
         if (mounted) setState(() => _sending = false);
+        final blocked = e.toString().contains('permission-denied');
         messenger.showSnackBar(
-          SnackBar(content: Text('Echec de l\'envoi : $e')),
+          SnackBar(
+            content: Text(blocked
+                ? 'Tes cœurs n\'ont pas pu être envoyés à cette personne.'
+                : 'Echec de l\'envoi : $e'),
+          ),
         );
       }
       return;
@@ -763,6 +877,12 @@ class ReceivePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(receivedHeartsProvider);
+    // Alias local : le nom que J'AI donne a chaque expediteur (par compte lie).
+    final people = ref.watch(peopleProvider).value ?? const <LovedOne>[];
+    final aliasByUid = <String, String>{
+      for (final p in people)
+        if (p.linkedUid != null && p.linkedUid!.isNotEmpty) p.linkedUid!: p.name,
+    };
     return async.when(
       loading: () =>
           const Center(child: CircularProgressIndicator(color: kPink)),
@@ -773,11 +893,11 @@ class ReceivePage extends ConsumerWidget {
               textAlign: TextAlign.center),
         ),
       ),
-      data: (all) => _content(all),
+      data: (all) => _content(all, aliasByUid),
     );
   }
 
-  Widget _content(List<Heart> hearts) {
+  Widget _content(List<Heart> hearts, Map<String, String> aliasByUid) {
     final total = hearts.fold<int>(0, (sum, h) => sum + h.count);
     if (hearts.isEmpty) {
       return const Center(
@@ -835,7 +955,10 @@ class ReceivePage extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
         for (final h in hearts) ...[
-          _HeartTile(heart: h),
+          _HeartTile(
+            heart: h,
+            displayName: aliasByUid[h.fromUid] ?? h.fromName,
+          ),
           const SizedBox(height: 10),
         ],
       ],
@@ -850,8 +973,9 @@ String _heartDateLabel(DateTime dt) {
 }
 
 class _HeartTile extends StatelessWidget {
-  const _HeartTile({required this.heart});
+  const _HeartTile({required this.heart, required this.displayName});
   final Heart heart;
+  final String displayName;
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(16),
@@ -899,7 +1023,7 @@ class _HeartTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(heart.fromName,
+                  Text(displayName,
                       style: const TextStyle(
                           fontWeight: FontWeight.w800, fontSize: 16)),
                   const SizedBox(height: 2),

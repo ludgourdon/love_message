@@ -73,9 +73,9 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
       context.go('/');
     } on InvitationException catch (e) {
       setState(() => _error = e.message);
-    } catch (e) {
-      // Affiche l'erreur brute pour diagnostic (ex: permission Firestore).
-      setState(() => _error = 'Erreur : $e');
+    } catch (_) {
+      setState(() =>
+          _error = 'Une erreur est survenue. Verifie ta connexion et reessaie.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }

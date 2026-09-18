@@ -216,6 +216,23 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
         return;
       }
 
+      // Deja present dans mon monde -> pas de doublon.
+      final existing = await peopleRepo.findByLinkedUid(user.uid, targetUid);
+      if (existing != null) {
+        final outgoing =
+            ref.read(outgoingRequestsProvider).value ?? const [];
+        final accepted = existing.linkStatus == 'accepted' ||
+            outgoing.any(
+                (r) => r.id == existing.requestId && r.status == 'accepted');
+        setState(() {
+          _saving = false;
+          _error = accepted
+              ? 'Tu es deja connecte a @$usernameInput.'
+              : 'Une demande de connexion est deja en cours avec @$usernameInput.';
+        });
+        return;
+      }
+
       // Compte trouve -> demande de connexion a accepter.
       final requestId = await ref.read(connectionsRepositoryProvider).sendRequest(
             fromUid: user.uid,
