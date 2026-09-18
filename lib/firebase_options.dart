@@ -52,21 +52,19 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyCqDCWiwdOFcKoQjScNM65k6-iLhElFLRk',
-    appId: '1:190998421033:android:8c7f705b86ba657628c638',
+    appId: '1:190998421033:android:3a00fc5ab8a2338528c638',
     messagingSenderId: '190998421033',
     projectId: 'love-message-2835b',
     storageBucket: 'love-message-2835b.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyB6JZyXZS3HciZ2SXt8aSmUrBWahx56Fv0',
-    appId: '1:190998421033:ios:e8c60d28d21047a828c638',
+    appId: '1:190998421033:ios:c9a472f403ae307e28c638',
     messagingSenderId: '190998421033',
     projectId: 'love-message-2835b',
     storageBucket: 'love-message-2835b.firebasestorage.app',
-    iosBundleId: 'com.example.loveMessage',
+    iosBundleId: 'com.coeuracoeur.app',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyB6JZyXZS3HciZ2SXt8aSmUrBWahx56Fv0',
     appId: '1:190998421033:ios:e8c60d28d21047a828c638',

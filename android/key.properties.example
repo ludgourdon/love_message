@@ -1,0 +1,7 @@
+# Copie ce fichier en android/key.properties (déjà ignoré par git) et renseigne
+# tes valeurs après avoir généré le keystore (voir instructions).
+storePassword=motDePasseDuKeystore
+keyPassword=motDePasseDeLaCle
+keyAlias=upload
+# Chemin ABSOLU vers ton keystore (ex: /Users/ludgourdon/keys/coeuracoeur-upload.jks)
+storeFile=/chemin/vers/coeuracoeur-upload.jks

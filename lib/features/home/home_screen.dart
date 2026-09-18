@@ -344,6 +344,8 @@ class WorldPage extends ConsumerWidget {
       for (final r in outgoing) r.id: r.status,
     };
     final blocked = ref.watch(blockedUidsProvider).value ?? const <String>{};
+    final deletedAccounts =
+        ref.watch(deletedLinkedUidsProvider).value ?? const <String>{};
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
       children: [
@@ -376,7 +378,20 @@ class WorldPage extends ConsumerWidget {
                     status: _statusFor(person, statusByRequest),
                     blocked: person.linkedUid != null &&
                         blocked.contains(person.linkedUid),
+                    accountDeleted: person.linkedUid != null &&
+                        deletedAccounts.contains(person.linkedUid),
                     onTap: () {
+                      if (person.linkedUid != null &&
+                          deletedAccounts.contains(person.linkedUid)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'Ce compte a été supprimé. Tu ne peux plus lui '
+                                'envoyer de cœurs.'),
+                          ),
+                        );
+                        return;
+                      }
                       if (person.linkStatus == 'invited') {
                         final uid = ref.read(authStateProvider).value?.uid;
                         if (uid != null) {
@@ -458,6 +473,7 @@ class _PersonCard extends StatelessWidget {
     required this.onDelete,
     this.status,
     this.blocked = false,
+    this.accountDeleted = false,
     this.onBlock,
     this.onUnblock,
   });
@@ -467,6 +483,7 @@ class _PersonCard extends StatelessWidget {
   final VoidCallback onDelete;
   final (String, Color)? status;
   final bool blocked;
+  final bool accountDeleted;
   final VoidCallback? onBlock;
   final VoidCallback? onUnblock;
 
@@ -476,15 +493,16 @@ class _PersonCard extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
-            leading: const Icon(Icons.edit_outlined, color: kPink),
-            title: const Text('Modifier'),
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              onEdit();
-            },
-          ),
-          if (onBlock != null || onUnblock != null)
+          if (!accountDeleted)
+            ListTile(
+              leading: const Icon(Icons.edit_outlined, color: kPink),
+              title: const Text('Modifier'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onEdit();
+              },
+            ),
+          if (!accountDeleted && (onBlock != null || onUnblock != null))
             ListTile(
               leading: Icon(
                 blocked ? Icons.lock_open_rounded : Icons.block_rounded,
@@ -548,7 +566,27 @@ class _PersonCard extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(person.note),
                     ],
-                    if (blocked) ...[
+                    if (accountDeleted) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: .08),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          'Compte supprimé',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ),
+                    ] else if (blocked) ...[
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(

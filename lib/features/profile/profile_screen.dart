@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -104,6 +105,16 @@ class ProfileScreen extends ConsumerWidget {
                   onTap: () => ref.read(authRepositoryProvider).signOut(),
                 ),
               ),
+              const SizedBox(height: 24),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => _confirmDeleteAccount(context, ref),
+                  icon: const Icon(Icons.delete_forever_rounded,
+                      color: Colors.redAccent),
+                  label: const Text('Supprimer mon compte'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                ),
+              ),
             ],
           );
         },
@@ -145,5 +156,127 @@ class ProfileScreen extends ConsumerWidget {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Pseudo mis a jour ✨')));
     }
+  }
+
+  Future<void> _confirmDeleteAccount(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _DeleteAccountDialog(),
+    );
+    if (ok == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ton compte a ete supprime.')),
+      );
+    }
+  }
+}
+
+/// Boite de dialogue : confirmation + mot de passe + suppression.
+class _DeleteAccountDialog extends ConsumerStatefulWidget {
+  const _DeleteAccountDialog();
+  @override
+  ConsumerState<_DeleteAccountDialog> createState() =>
+      _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
+  final _password = TextEditingController();
+  bool _loading = false;
+  bool _obscure = true;
+  String? _error;
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _delete() async {
+    if (_password.text.isEmpty) {
+      setState(() => _error = 'Entre ton mot de passe pour confirmer.');
+      return;
+    }
+    final auth = ref.read(authRepositoryProvider);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await auth.deleteAccount(password: _password.text);
+      if (mounted) Navigator.of(context).pop(true);
+      // La redirection go_router ramene vers /login apres la suppression.
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        _loading = false;
+        _error = switch (e.code) {
+          'wrong-password' || 'invalid-credential' =>
+            'Mot de passe incorrect.',
+          'requires-recent-login' =>
+            'Reconnecte-toi puis reessaie.',
+          _ => 'Suppression impossible. Reessaie.',
+        };
+      });
+    } catch (_) {
+      setState(() {
+        _loading = false;
+        _error = 'Une erreur est survenue. Reessaie.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Supprimer mon compte ?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Cette action est definitive. Ton profil, ton nom d\'utilisateur '
+            'et tes proches seront supprimes. Entre ton mot de passe pour '
+            'confirmer.',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _password,
+            obscureText: _obscure,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Mot de passe',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(
+                    _obscure ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscure = !_obscure),
+              ),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed:
+              _loading ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+          onPressed: _loading ? null : _delete,
+          child: _loading
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.5, color: Colors.white),
+                )
+              : const Text('Supprimer'),
+        ),
+      ],
+    );
   }
 }

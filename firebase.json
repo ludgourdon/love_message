@@ -4,14 +4,14 @@
       "android": {
         "default": {
           "projectId": "love-message-2835b",
-          "appId": "1:190998421033:android:8c7f705b86ba657628c638",
+          "appId": "1:190998421033:android:3a00fc5ab8a2338528c638",
           "fileOutput": "android/app/google-services.json"
         }
       },
       "ios": {
         "default": {
           "projectId": "love-message-2835b",
-          "appId": "1:190998421033:ios:e8c60d28d21047a828c638",
+          "appId": "1:190998421033:ios:c9a472f403ae307e28c638",
           "uploadDebugSymbols": true,
           "fileOutput": "ios/Runner/GoogleService-Info.plist"
         }
@@ -28,11 +28,8 @@
         "lib/firebase_options.dart": {
           "projectId": "love-message-2835b",
           "configurations": {
-            "android": "1:190998421033:android:8c7f705b86ba657628c638",
-            "ios": "1:190998421033:ios:e8c60d28d21047a828c638",
-            "macos": "1:190998421033:ios:e8c60d28d21047a828c638",
-            "web": "1:190998421033:web:9e0f1d0d6982eac328c638",
-            "windows": "1:190998421033:web:8c4c64e6dbc9555b28c638"
+            "android": "1:190998421033:android:3a00fc5ab8a2338528c638",
+            "ios": "1:190998421033:ios:c9a472f403ae307e28c638"
           }
         }
       }
@@ -41,5 +38,20 @@
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "hosting": {
+    "public": "public",
+    "cleanUrls": true,
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/privacy",
+        "destination": "/privacy.html"
+      }
+    ]
   }
 }
