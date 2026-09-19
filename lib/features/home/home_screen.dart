@@ -13,6 +13,8 @@ import '../people/loved_one.dart';
 import '../people/people_providers.dart';
 import '../people/person_editor.dart';
 import '../blocks/blocks_providers.dart';
+import '../notifications/notifications_providers.dart';
+import '../ads/ad_banner.dart';
 import '../hearts/heart.dart';
 import '../hearts/hearts_providers.dart';
 import '../profile/profile_providers.dart';
@@ -37,6 +39,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   String? _heartsUid;
   final Set<String> _animatedHeartIds = <String>{};
   final Set<String> _reconciling = <String>{};
+  String? _notifUid;
   @override
   Widget build(BuildContext context) {
     final incomingCount =
@@ -46,6 +49,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (uid != _heartsUid) {
       _heartsUid = uid;
       _animatedHeartIds.clear();
+    }
+    if (uid != null && uid != _notifUid) {
+      _notifUid = uid;
+      Future.microtask(
+        () => ref.read(notificationsServiceProvider).registerForUser(uid),
+      );
     }
     ref.listen<AsyncValue<List<Heart>>>(
       receivedHeartsProvider,
@@ -121,7 +130,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_celebration == null) const AdBanner(),
+          NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: _onTabSelected,
         destinations: [
@@ -138,6 +151,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             selectedIcon: const Icon(Icons.auto_awesome),
             label: 'Recevoir',
+          ),
+        ],
           ),
         ],
       ),
@@ -227,8 +242,8 @@ class WorldPage extends ConsumerWidget {
   (String, Color)? _statusFor(LovedOne person, Map<String, String> byRequest) {
     switch (person.linkStatus) {
       case 'accepted':
-        // Cote accepteur : la connexion est enregistree directement.
-        return ('Connecté ✅', const Color(0xFF2E9E6B));
+        // Compte connecte : pas de badge.
+        return null;
       case 'invited':
         return ('Invité ✉️', kLavender);
       case 'pending':
@@ -238,7 +253,8 @@ class WorldPage extends ConsumerWidget {
             rid != null ? (byRequest[rid] ?? 'pending') : 'pending';
         switch (status) {
           case 'accepted':
-            return ('Connecté ✅', const Color(0xFF2E9E6B));
+            // Connecte : pas de badge.
+            return null;
           case 'declined':
             return ('Refusé', Colors.redAccent);
           default:
@@ -260,7 +276,7 @@ class WorldPage extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Retirer ${person.name} ?'),
-        content: const Text('Ce proche sera retire de ton petit monde.'),
+        content: const Text('Ce proche sera retiré de ton petit monde.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -349,6 +365,7 @@ class WorldPage extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
       children: [
+        const _VerifyEmailBanner(),
         const Text(
           'Mon petit monde',
           style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800),
@@ -369,7 +386,14 @@ class WorldPage extends ConsumerWidget {
             child: Text('Impossible de charger tes proches.\n$e'),
           ),
           data: (people) {
-            if (people.isEmpty) return const _EmptyPeople();
+            if (people.isEmpty) {
+              return const Column(
+                children: [
+                  _EmptyPeople(),
+                  SizedBox(height: 20),
+                ],
+              );
+            }
             return Column(
               children: [
                 for (final person in people) ...[
@@ -463,6 +487,99 @@ class _EmptyPeople extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _VerifyEmailBanner extends ConsumerWidget {
+  const _VerifyEmailBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final verified = ref.watch(emailVerifiedProvider);
+    if (verified) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kLavender.withValues(alpha: .22),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.mark_email_unread_outlined, color: kPink),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Vérifie ton adresse email',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Tant que ton email n\'est pas validé, tu ne peux pas ajouter de '
+            'proche ni être ajouté. Ouvre le lien reçu par email, puis appuie '
+            'sur « J\'ai validé ».',
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: kPink),
+                onPressed: () => _checkVerified(context, ref),
+                child: const Text('J\'ai validé'),
+              ),
+              TextButton(
+                onPressed: () => _resend(context, ref),
+                style: TextButton.styleFrom(foregroundColor: kPink),
+                child: const Text('Renvoyer l\'email'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _checkVerified(BuildContext context, WidgetRef ref) async {
+    final auth = ref.read(authRepositoryProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    final verified = await auth.reloadAndCheckVerified();
+    ref.read(emailVerifiedProvider.notifier).set(verified);
+    if (verified) {
+      // Attribue le nom d'utilisateur maintenant que le compte est vérifié.
+      final user = ref.read(authStateProvider).value;
+      if (user != null) {
+        await ref.read(directoryRepositoryProvider).ensureUsername(
+              uid: user.uid,
+              displayName: user.displayName ?? '',
+              email: user.email,
+            );
+      }
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Email validé ✅')),
+      );
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Pas encore validé. Ouvre le lien reçu par email.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _resend(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await ref.read(authRepositoryProvider).resendVerificationEmail();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Email de vérification renvoyé 💌')),
+    );
+  }
 }
 
 class _PersonCard extends StatelessWidget {
@@ -736,7 +853,7 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
           SnackBar(
             content: Text(blocked
                 ? 'Tes cœurs n\'ont pas pu être envoyés à cette personne.'
-                : 'Echec de l\'envoi : $e'),
+                : 'Échec de l\'envoi : $e'),
           ),
         );
       }
@@ -747,8 +864,8 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
       messenger.showSnackBar(
         const SnackBar(
           content: Text(
-              'Ce proche n\'a pas encore accepte la connexion — tu pourras lui '
-              'envoyer des coeurs une fois connecte.'),
+              'Ce proche n\'a pas encore accepté la connexion — tu pourras lui '
+              'envoyer des cœurs une fois connecté.'),
         ),
       );
       return;
@@ -937,6 +1054,15 @@ class ReceivePage extends ConsumerWidget {
 
   Widget _content(List<Heart> hearts, Map<String, String> aliasByUid) {
     final total = hearts.fold<int>(0, (sum, h) => sum + h.count);
+    // Total de cœurs reçus par contact (expéditeur).
+    final countByUid = <String, int>{};
+    final nameByUid = <String, String>{};
+    for (final h in hearts) {
+      countByUid[h.fromUid] = (countByUid[h.fromUid] ?? 0) + h.count;
+      nameByUid[h.fromUid] = aliasByUid[h.fromUid] ?? h.fromName;
+    }
+    final senders = countByUid.keys.toList()
+      ..sort((a, b) => countByUid[b]!.compareTo(countByUid[a]!));
     if (hearts.isEmpty) {
       return const Center(
         child: Padding(
@@ -986,6 +1112,22 @@ class ReceivePage extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 24),
+        if (senders.length > 1) ...[
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Par personne',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          ),
+          const SizedBox(height: 12),
+          for (final uid in senders) ...[
+            _SenderTotalRow(
+              name: nameByUid[uid] ?? 'Quelqu\'un',
+              count: countByUid[uid]!,
+            ),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 16),
+        ],
         const Align(
           alignment: Alignment.centerLeft,
           child: Text('Tes cœurs reçus',
@@ -1008,6 +1150,37 @@ String _heartDateLabel(DateTime dt) {
   final d = dt.toLocal();
   String two(int n) => n.toString().padLeft(2, '0');
   return 'le ${two(d.day)}/${two(d.month)}/${d.year} à ${two(d.hour)}h${two(d.minute)}';
+}
+
+class _SenderTotalRow extends StatelessWidget {
+  const _SenderTotalRow({required this.name, required this.count});
+  final String name;
+  final int count;
+  @override
+  Widget build(BuildContext context) {
+    final s = count > 1 ? 's' : '';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              name,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          ),
+          Text(
+            '$count cœur$s 💗',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: kPink),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _HeartTile extends StatelessWidget {

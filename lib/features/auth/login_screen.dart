@@ -49,17 +49,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (user != null) {
         await profileRepo.ensureProfile(user);
         // Rattrape l'attribution du nom d'utilisateur (comptes anterieurs).
-        await directory.ensureUsername(
-              uid: user.uid,
-              displayName: user.displayName ?? '',
-              email: user.email,
-            );
+        // Username attribué uniquement pour un compte vérifié.
+        if (user.emailVerified) {
+          await directory.ensureUsername(
+                uid: user.uid,
+                displayName: user.displayName ?? '',
+                email: user.email,
+              );
+        }
       }
       // La redirection go_router s'occupe de la navigation.
     } on FirebaseAuthException catch (e) {
       setState(() => _error = authErrorMessage(e));
     } catch (_) {
-      setState(() => _error = 'Une erreur est survenue. Reessaie.');
+      setState(() => _error = 'Une erreur est survenue. Réessaie.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -68,14 +71,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _resetPassword() async {
     final email = _email.text.trim();
     if (email.isEmpty) {
-      setState(() => _error = 'Entre ton email pour reinitialiser le mot de passe.');
+      setState(() => _error = 'Entre ton email pour réinitialiser le mot de passe.');
       return;
     }
     try {
       await ref.read(authRepositoryProvider).sendPasswordReset(email);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email de reinitialisation envoye.')),
+        const SnackBar(content: Text('Email de réinitialisation envoyé.')),
       );
     } on FirebaseAuthException catch (e) {
       setState(() => _error = authErrorMessage(e));
@@ -132,13 +135,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ),
                     validator: (v) =>
-                        (v == null || v.length < 6) ? '6 caracteres minimum' : null,
+                        (v == null || v.length < 6) ? '6 caractères minimum' : null,
                   ),
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
                       onPressed: _loading ? null : _resetPassword,
-                      child: const Text('Mot de passe oublie ?'),
+                      child: const Text('Mot de passe oublié ?'),
                     ),
                   ),
                   if (_error != null) ...[

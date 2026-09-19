@@ -51,27 +51,43 @@ class ConnectionsRepository {
   /// Accepte une demande : marque la demande acceptee ET ajoute l'expediteur
   /// au "petit monde" de celui qui accepte (request.toUid). Atomique.
   Future<void> accept(ConnectionRequest request) async {
+    final people = _firestore
+        .collection('users')
+        .doc(request.toUid)
+        .collection('people');
+
+    // Si l'expéditeur est déjà présent dans mon monde, on réutilise cette
+    // carte (et on conserve le nom que j'ai éventuellement choisi) au lieu
+    // d'en créer une seconde.
+    final existing = await people
+        .where('linkedUid', isEqualTo: request.fromUid)
+        .limit(1)
+        .get();
+
     final batch = _firestore.batch();
     batch.update(_requests.doc(request.id), {'status': 'accepted'});
 
-    final personRef = _firestore
-        .collection('users')
-        .doc(request.toUid)
-        .collection('people')
-        .doc();
-    batch.set(personRef, {
-      'name': request.fromDisplayName.trim().isNotEmpty
-          ? request.fromDisplayName.trim()
-          : '@${request.fromUsername}',
-      'note': '',
-      'emoji': '💗',
-      'color': 0xFFFFD4E2,
-      'linkedUid': request.fromUid,
-      'linkedUsername': request.fromUsername,
-      'requestId': request.id,
-      'linkStatus': 'accepted',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    if (existing.docs.isNotEmpty) {
+      batch.update(existing.docs.first.reference, {
+        'linkedUsername': request.fromUsername,
+        'requestId': request.id,
+        'linkStatus': 'accepted',
+      });
+    } else {
+      batch.set(people.doc(), {
+        'name': request.fromDisplayName.trim().isNotEmpty
+            ? request.fromDisplayName.trim()
+            : '@${request.fromUsername}',
+        'note': '',
+        'emoji': '💗',
+        'color': 0xFFFFD4E2,
+        'linkedUid': request.fromUid,
+        'linkedUsername': request.fromUsername,
+        'requestId': request.id,
+        'linkStatus': 'accepted',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
 
     await batch.commit();
   }
@@ -133,7 +149,7 @@ class ConnectionsRepository {
     final already =
         await myPeople.where('linkedUid', isEqualTo: fromUid).limit(1).get();
     if (already.docs.isNotEmpty) {
-      throw InvitationException('Tu es deja connecte a $inviterName.');
+      throw InvitationException('Tu es déjà connecté à $inviterName.');
     }
 
     final batch = _firestore.batch();
@@ -212,8 +228,9 @@ class ConnectionsRepository {
           ? inv.toDisplayName.trim()
           : (inv.toUsername.isNotEmpty ? '@${inv.toUsername}' : 'Nouveau proche');
       if (cardRef != null) {
+        // On conserve le nom choisi par l'invitant lors de l'ajout ;
+        // on ne met à jour que le lien.
         batch.update(cardRef, {
-          'name': name,
           'linkedUid': inv.toUid,
           'linkedUsername': inv.toUsername,
           'linkStatus': 'accepted',

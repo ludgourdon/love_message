@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../theme.dart';
 import 'auth_errors.dart';
-import '../connections/connection_providers.dart';
 import 'auth_providers.dart';
 
 class SignupScreen extends ConsumerStatefulWidget {
@@ -39,7 +38,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     // Capture avant tout await : la redirection go_router detruit cet ecran
     // des la creation du compte, donc `ref` ne serait plus utilisable ensuite.
     final auth = ref.read(authRepositoryProvider);
-    final directory = ref.read(directoryRepositoryProvider);
     setState(() {
       _loading = true;
       _error = null;
@@ -50,20 +48,14 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             password: _password.text,
             displayName: _name.text,
           );
-      // Attribue automatiquement un nom d'utilisateur unique.
-      final user = auth.currentUser;
-      if (user != null) {
-        await directory.ensureUsername(
-              uid: user.uid,
-              displayName: _name.text,
-              email: user.email,
-            );
-      }
+      // Le nom d'utilisateur n'est attribué qu'après vérification de l'email
+      // (voir la bannière sur l'accueil) : un compte non vérifié n'est pas
+      // découvrable et ne peut donc pas être ajouté.
       // La redirection go_router s'occupe de la navigation vers l'accueil.
     } on FirebaseAuthException catch (e) {
       setState(() => _error = authErrorMessage(e));
     } catch (_) {
-      setState(() => _error = 'Une erreur est survenue. Reessaie.');
+      setState(() => _error = 'Une erreur est survenue. Réessaie.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -86,7 +78,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Cree ton petit monde 💗',
+                  'Crée ton petit monde 💗',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
                 ),
@@ -130,7 +122,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     ),
                   ),
                   validator: (v) =>
-                      (v == null || v.length < 6) ? '6 caracteres minimum' : null,
+                      (v == null || v.length < 6) ? '6 caractères minimum' : null,
                 ),
                 const SizedBox(height: 14),
                 TextFormField(
@@ -168,13 +160,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Creer mon compte'),
+                      : const Text('Créer mon compte'),
                 ),
                 const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('Deja un compte ?'),
+                    const Text('Déjà un compte ?'),
                     TextButton(
                       onPressed: _loading ? null : () => context.pop(),
                       child: const Text('Se connecter'),

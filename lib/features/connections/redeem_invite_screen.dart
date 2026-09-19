@@ -48,6 +48,7 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
     if (me == null) return;
 
     // Capture les repos avant tout await.
+    final auth = ref.read(authRepositoryProvider);
     final connections = ref.read(connectionsRepositoryProvider);
     final profiles = ref.read(profileRepositoryProvider);
 
@@ -56,6 +57,16 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
       _error = null;
     });
     try {
+      // Email obligatoirement vérifié pour se connecter à un proche.
+      final verified = await auth.reloadAndCheckVerified();
+      if (!verified) {
+        setState(() {
+          _loading = false;
+          _error = 'Valide ton adresse email avant de te connecter à un proche '
+              '(un lien t\'a été envoyé à l\'inscription).';
+        });
+        return;
+      }
       final myProfile = await profiles.fetchProfile(me.uid);
       final result = await connections.redeemInvitation(
         code: code,
@@ -67,7 +78,7 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
       final messenger = ScaffoldMessenger.of(context);
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Tu es maintenant connecte a ${result.inviterName} 💗'),
+          content: Text('Tu es maintenant connecté à ${result.inviterName} 💗'),
         ),
       );
       context.go('/');
@@ -75,7 +86,7 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
       setState(() => _error = e.message);
     } catch (_) {
       setState(() =>
-          _error = 'Une erreur est survenue. Verifie ta connexion et reessaie.');
+          _error = 'Une erreur est survenue. Vérifie ta connexion et réessaie.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -106,13 +117,13 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
               const Center(child: Text('💌', style: TextStyle(fontSize: 64))),
               const SizedBox(height: 16),
               const Text(
-                'Connecte-toi a la personne qui t\'a invite',
+                'Connecte-toi à la personne qui t\'a invite',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 8),
               const Text(
-                'Colle ici le code (ou le lien) que tu as recu. Vous serez '
+                'Colle ici le code (ou le lien) que tu as reçu. Vous serez '
                 'ajoutes automatiquement dans vos petits mondes respectifs.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: kInk),

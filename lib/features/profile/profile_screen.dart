@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../theme.dart';
 import '../auth/auth_providers.dart';
 import 'profile_providers.dart';
+import '../notifications/notifications_providers.dart';
+import '../ads/consent_service.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -91,7 +93,7 @@ class ProfileScreen extends ConsumerWidget {
                 child: ListTile(
                   leading: const Icon(Icons.card_giftcard_rounded, color: kPink),
                   title: const Text('J\'ai un code d\'invitation'),
-                  subtitle: const Text('Me connecter a la personne qui m\'a invite'),
+                  subtitle: const Text('Me connecter à la personne qui m\'a invité'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => context.push('/redeem'),
                 ),
@@ -100,9 +102,39 @@ class ProfileScreen extends ConsumerWidget {
               Card(
                 color: Colors.white,
                 child: ListTile(
+                  leading: const Icon(Icons.privacy_tip_outlined, color: kPink),
+                  title: const Text('Gérer mon consentement'),
+                  subtitle: const Text('Choix de confidentialité pour les publicités'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final error = await ConsentService.showPrivacyOptions();
+                    if (error != null) {
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Options de confidentialité indisponibles pour le moment.'),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                color: Colors.white,
+                child: ListTile(
                   leading: const Icon(Icons.logout_rounded, color: kPink),
-                  title: const Text('Se deconnecter'),
-                  onTap: () => ref.read(authRepositoryProvider).signOut(),
+                  title: const Text('Se déconnecter'),
+                  onTap: () async {
+                    final u = ref.read(authStateProvider).value;
+                    if (u != null) {
+                      await ref
+                          .read(notificationsServiceProvider)
+                          .removeCurrentToken(u.uid);
+                    }
+                    await ref.read(authRepositoryProvider).signOut();
+                  },
                 ),
               ),
               const SizedBox(height: 24),
@@ -154,7 +186,7 @@ class ProfileScreen extends ConsumerWidget {
     await ref.read(profileRepositoryProvider).updateDisplayName(user.uid, newName);
     if (context.mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Pseudo mis a jour ✨')));
+          .showSnackBar(const SnackBar(content: Text('Pseudo mis à jour ✨')));
     }
   }
 
@@ -165,7 +197,7 @@ class ProfileScreen extends ConsumerWidget {
     );
     if (ok == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ton compte a ete supprime.')),
+        const SnackBar(content: Text('Ton compte a été supprimé.')),
       );
     }
   }
@@ -212,14 +244,14 @@ class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
           'wrong-password' || 'invalid-credential' =>
             'Mot de passe incorrect.',
           'requires-recent-login' =>
-            'Reconnecte-toi puis reessaie.',
-          _ => 'Suppression impossible. Reessaie.',
+            'Reconnecte-toi puis réessaie.',
+          _ => 'Suppression impossible. Réessaie.',
         };
       });
     } catch (_) {
       setState(() {
         _loading = false;
-        _error = 'Une erreur est survenue. Reessaie.';
+        _error = 'Une erreur est survenue. Réessaie.';
       });
     }
   }
@@ -233,8 +265,8 @@ class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Cette action est definitive. Ton profil, ton nom d\'utilisateur '
-            'et tes proches seront supprimes. Entre ton mot de passe pour '
+            'Cette action est définitive. Ton profil, ton nom d\'utilisateur '
+            'et tes proches seront supprimés. Entre ton mot de passe pour '
             'confirmer.',
           ),
           const SizedBox(height: 16),

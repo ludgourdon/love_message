@@ -6,17 +6,17 @@ String authErrorMessage(FirebaseAuthException e) {
     case 'invalid-email':
       return 'Adresse email invalide.';
     case 'user-disabled':
-      return 'Ce compte a ete desactive.';
+      return 'Ce compte a été désactivé.';
     case 'user-not-found':
     case 'wrong-password':
     case 'invalid-credential':
       return 'Email ou mot de passe incorrect.';
     case 'email-already-in-use':
-      return 'Un compte existe deja avec cet email.';
+      return 'Un compte existe déjà avec cet email.';
     case 'weak-password':
-      return 'Mot de passe trop faible (6 caracteres minimum).';
+      return 'Mot de passe trop faible (6 caractères minimum).';
     case 'too-many-requests':
-      return 'Trop de tentatives. Reessaie plus tard.';
+      return 'Trop de tentatives. Réessaie plus tard.';
     case 'network-request-failed':
       return 'Probleme de connexion reseau.';
     default:

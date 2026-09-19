@@ -53,5 +53,11 @@
         "destination": "/privacy.html"
       }
     ]
-  }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default"
+    }
+  ]
 }

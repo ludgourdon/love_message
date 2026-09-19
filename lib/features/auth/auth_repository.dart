@@ -40,6 +40,22 @@ class AuthRepository {
       'photoUrl': null,
       'createdAt': FieldValue.serverTimestamp(),
     });
+    // Envoie l'email de vérification (en français).
+    await _auth.setLanguageCode('fr');
+    await user.sendEmailVerification();
+  }
+
+  bool get isEmailVerified => _auth.currentUser?.emailVerified ?? false;
+
+  Future<void> resendVerificationEmail() async {
+    await _auth.setLanguageCode('fr');
+    await _auth.currentUser?.sendEmailVerification();
+  }
+
+  /// Recharge l'utilisateur et renvoie l'état de vérification à jour.
+  Future<bool> reloadAndCheckVerified() async {
+    await _auth.currentUser?.reload();
+    return _auth.currentUser?.emailVerified ?? false;
   }
 
   /// Supprime definitivement le compte : re-authentifie avec le mot de passe,
@@ -74,7 +90,7 @@ class AuthRepository {
           .catchError((_) {});
     }
     // Supprime les sous-collections (proches + blocages).
-    for (final sub in ['people', 'blocked']) {
+    for (final sub in ['people', 'blocked', 'fcmTokens']) {
       final docs = await userRef.collection(sub).get();
       for (final d in docs.docs) {
         await d.reference.delete().catchError((_) {});

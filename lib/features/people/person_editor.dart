@@ -84,6 +84,7 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
   late String _emoji;
   late int _color;
   bool _saving = false;
+  bool _knowsUsername = false;
   String? _error;
 
   bool get _isEdit => widget.existing != null;
@@ -117,7 +118,7 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
     final peopleRepo = ref.read(peopleRepositoryProvider);
     final name = _name.text.trim();
     final note = _note.text.trim();
-    final usernameInput = _username.text.trim();
+    final usernameInput = _knowsUsername ? _username.text.trim() : '';
 
     setState(() {
       _saving = true;
@@ -136,6 +137,18 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
           color: _color,
         );
         navigator.pop();
+        return;
+      }
+
+      // Email obligatoirement vérifié pour ajouter quelqu'un.
+      final verified =
+          await ref.read(authRepositoryProvider).reloadAndCheckVerified();
+      if (!verified) {
+        setState(() {
+          _saving = false;
+          _error = 'Valide ton adresse email avant d\'ajouter quelqu\'un '
+              '(un lien t\'a été envoyé à l\'inscription).';
+        });
         return;
       }
 
@@ -190,7 +203,7 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
         setState(() {
           _saving = false;
           _error =
-              'Ton nom d\'utilisateur n\'est pas encore pret. Reessaie dans un instant.';
+              'Ton nom d\'utilisateur n\'est pas encore prêt. Réessaie dans un instant.';
         });
         return;
       }
@@ -227,8 +240,8 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
         setState(() {
           _saving = false;
           _error = accepted
-              ? 'Tu es deja connecte a @$usernameInput.'
-              : 'Une demande de connexion est deja en cours avec @$usernameInput.';
+              ? 'Tu es déjà connecté à @$usernameInput.'
+              : 'Une demande de connexion est déjà en cours avec @$usernameInput.';
         });
         return;
       }
@@ -255,13 +268,13 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
       );
       navigator.pop();
       messenger.showSnackBar(
-        SnackBar(content: Text('Demande envoyee a @$usernameInput 💌')),
+        SnackBar(content: Text('Demande envoyée à @$usernameInput 💌')),
       );
     } catch (e) {
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = 'Echec de l\'enregistrement. Reessaie.';
+          _error = 'Échec de l\'enregistrement. Réessaie.';
         });
       }
     }
@@ -319,29 +332,80 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
                 controller: _note,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(
-                  labelText: 'Petit mot',
-                  hintText: 'Ma personne preferee 🌸',
+                  labelText: 'Description (facultatif)',
+                  hintText: 'Ex. : ma sœur, ma personne préférée 🌸',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.favorite_border),
+                  prefixIcon: Icon(Icons.notes_rounded),
+                  helperMaxLines: 2,
+                  helperText:
+                      'Une note pour te souvenir de qui c\'est. Visible seulement par toi.',
                 ),
               ),
               if (!_isEdit) ...[
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _username,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Nom d\'utilisateur (optionnel)',
-                    prefixText: '@',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.link),
-                    helperMaxLines: 3,
-                    helperText:
-                        'Rempli : une demande de connexion est envoyee (le compte '
-                        'doit exister). Vide : tu partages un lien d\'invitation.',
+                const SizedBox(height: 20),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Connais-tu son nom d\'utilisateur ?',
+                    style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
+                const SizedBox(height: 10),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(
+                      value: true,
+                      label: Text('Oui'),
+                      icon: Icon(Icons.alternate_email),
+                    ),
+                    ButtonSegment(
+                      value: false,
+                      label: Text('Non'),
+                      icon: Icon(Icons.mail_outline),
+                    ),
+                  ],
+                  selected: {_knowsUsername},
+                  onSelectionChanged: (sel) =>
+                      setState(() => _knowsUsername = sel.first),
+                ),
+                const SizedBox(height: 14),
+                if (_knowsUsername)
+                  TextFormField(
+                    controller: _username,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Nom d\'utilisateur',
+                      prefixText: '@',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.link),
+                      helperMaxLines: 3,
+                      helperText:
+                          'Une demande de connexion lui sera envoyée. '
+                          'Le compte doit exister avec ce nom d\'utilisateur.',
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: kLavender.withValues(alpha: .18),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.mail_outline, color: kPink),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Pas de souci : on te proposera un lien '
+                            'd\'invitation à lui envoyer. Elle rejoindra ton '
+                            'petit monde après l\'avoir accepté.',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
               if (_error != null) ...[
                 const SizedBox(height: 12),

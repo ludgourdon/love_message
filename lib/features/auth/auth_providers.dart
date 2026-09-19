@@ -12,3 +12,14 @@ final authRepositoryProvider = Provider<AuthRepository>(
 final authStateProvider = StreamProvider<User?>(
   (ref) => ref.watch(authRepositoryProvider).authStateChanges(),
 );
+
+/// État de vérification de l'email (rafraîchi manuellement via la bannière).
+class EmailVerifiedNotifier extends Notifier<bool> {
+  @override
+  bool build() => FirebaseAuth.instance.currentUser?.emailVerified ?? false;
+
+  void set(bool value) => state = value;
+}
+
+final emailVerifiedProvider =
+    NotifierProvider<EmailVerifiedNotifier, bool>(EmailVerifiedNotifier.new);
