@@ -104,7 +104,6 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: kCream,
         elevation: 0,
         title: const Text('J\'ai un code d\'invitation'),
       ),

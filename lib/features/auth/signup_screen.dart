@@ -65,7 +65,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: kCream,
         elevation: 0,
         title: const Text('Inscription'),
       ),

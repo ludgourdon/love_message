@@ -46,6 +46,7 @@ dependencies:
   in_app_purchase: ^3.3.0
   intl: ^0.20.3
   share_plus: ^13.3.0
+  shared_preferences: ^2.3.0
 
 dev_dependencies:
   flutter_test:

@@ -1,0 +1,138 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// --------------------------------------------------------------------------
+/// Premium V1 : thèmes, animations et packs de petits mots.
+///
+/// Pour cette V1, TOUT est débloqué : aucune vérification d'abonnement.
+/// Chaque choix est mémorisé sur l'appareil (SharedPreferences) pour survivre
+/// à un redémarrage de l'app. Quand l'achat in-app sera branché, il suffira de
+/// conditionner l'accès à ces sélecteurs.
+/// --------------------------------------------------------------------------
+
+/// Palette de couleurs sélectionnable. Le [seed] pilote tout le ColorScheme.
+class ThemeAccent {
+  const ThemeAccent(this.name, this.emoji, this.seed, this.background);
+  final String name;
+  final String emoji;
+
+  /// Couleur d'accent principale (boutons, cœur, mises en avant).
+  final Color seed;
+
+  /// Fond d'écran harmonieux : teinte très claire de la même famille que
+  /// [seed], pensée pour rester lisible avec le texte foncé.
+  final Color background;
+}
+
+const kThemeAccents = <ThemeAccent>[
+  ThemeAccent('Rose tendre', '🌸', Color(0xFFFF6F9F), Color(0xFFFFF0F5)),
+  ThemeAccent('Lavande', '💜', Color(0xFF9B7EDE), Color(0xFFF4EFFC)),
+  ThemeAccent('Océan', '🌊', Color(0xFF3FA7C4), Color(0xFFECF6FA)),
+  ThemeAccent('Coucher de soleil', '🌅', Color(0xFFFF8360), Color(0xFFFFF1EA)),
+  ThemeAccent('Forêt', '🌿', Color(0xFF5AA97B), Color(0xFFECF6EF)),
+];
+
+/// Style d'animation lors de la réception de cœurs (jeu d'emojis qui montent).
+class AnimationStyle {
+  const AnimationStyle(this.name, this.emojis);
+  final String name;
+  final List<String> emojis;
+  String get preview => emojis.first;
+}
+
+const kAnimationStyles = <AnimationStyle>[
+  AnimationStyle('Cœurs', ['💗', '💖', '💕', '❤️', '💞', '🩷']),
+  AnimationStyle('Étoiles', ['⭐', '✨', '🌟', '💫', '🌠', '⚡']),
+  AnimationStyle('Fleurs', ['🌸', '🌺', '🌼', '🌻', '🌷', '💐']),
+  AnimationStyle('Confettis', ['🎉', '🎊', '✨', '🎈', '💫', '🥳']),
+  AnimationStyle('Papillons', ['🦋', '🌈', '✨', '🌸', '💖', '🕊️']),
+];
+
+/// Pack de petits mots proposés en un clic sur l'écran d'envoi.
+class WordPack {
+  const WordPack(this.name, this.emoji, this.words);
+  final String name;
+  final String emoji;
+  final List<String> words;
+}
+
+const kWordPacks = <WordPack>[
+  WordPack('Tendresse', '💗', [
+    'Je pense à toi 🌸',
+    'Tu es mon petit soleil ☀️',
+    'Un gros câlin 🧸',
+    'Juste parce que je t’aime 💗',
+  ]),
+  WordPack('Bonne nuit', '🌙', [
+    'Fais de beaux rêves 🌙',
+    'Bonne nuit 😴',
+    'Je veille sur toi ✨',
+    'Dors bien mon cœur 💫',
+  ]),
+  WordPack('Occasions', '🎉', [
+    'Joyeux anniversaire 🎂',
+    'Félicitations ! 🎉',
+    'Bonne fête 💐',
+    'Bravo à toi 🌟',
+  ]),
+  WordPack('Mots doux', '💌', [
+    'Tu me manques 🥺',
+    'Toujours là pour toi 🤍',
+    'Mon cœur est à toi 💌',
+    'Merci d’exister 💞',
+  ]),
+  WordPack('Humour', '😄', [
+    'Coucou toi 👀',
+    'Team câlins 🧸',
+    'Alerte tendresse 🚨',
+    '100% amour 💯',
+  ]),
+];
+
+/// Injecté depuis main() après préchargement.
+final sharedPreferencesProvider = Provider<SharedPreferences>(
+  (ref) => throw UnimplementedError('SharedPreferences non initialisées'),
+);
+
+/// Notifier générique : mémorise un index sélectionné (thème, animation, pack).
+class PremiumChoiceNotifier extends Notifier<int> {
+  PremiumChoiceNotifier(this.storageKey, this.count);
+  final String storageKey;
+  final int count;
+
+  @override
+  int build() {
+    final prefs = ref.read(sharedPreferencesProvider);
+    final v = prefs.getInt(storageKey) ?? 0;
+    return (v >= 0 && v < count) ? v : 0;
+  }
+
+  void select(int index) {
+    if (index < 0 || index >= count || index == state) return;
+    state = index;
+    ref.read(sharedPreferencesProvider).setInt(storageKey, index);
+  }
+}
+
+final themeAccentIndexProvider = NotifierProvider<PremiumChoiceNotifier, int>(
+  () => PremiumChoiceNotifier('premium.theme', kThemeAccents.length),
+);
+final animationStyleIndexProvider =
+    NotifierProvider<PremiumChoiceNotifier, int>(
+  () => PremiumChoiceNotifier('premium.anim', kAnimationStyles.length),
+);
+final wordPackIndexProvider = NotifierProvider<PremiumChoiceNotifier, int>(
+  () => PremiumChoiceNotifier('premium.pack', kWordPacks.length),
+);
+
+/// Valeurs dérivées, pratiques à consommer dans l'UI.
+final themeAccentProvider = Provider<ThemeAccent>(
+  (ref) => kThemeAccents[ref.watch(themeAccentIndexProvider)],
+);
+final animationStyleProvider = Provider<AnimationStyle>(
+  (ref) => kAnimationStyles[ref.watch(animationStyleIndexProvider)],
+);
+final wordPackProvider = Provider<WordPack>(
+  (ref) => kWordPacks[ref.watch(wordPackIndexProvider)],
+);

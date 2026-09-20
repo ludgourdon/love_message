@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -15,16 +17,10 @@ import '../people/person_editor.dart';
 import '../blocks/blocks_providers.dart';
 import '../notifications/notifications_providers.dart';
 import '../ads/ad_banner.dart';
+import '../premium/premium_prefs.dart';
 import '../hearts/heart.dart';
 import '../hearts/hearts_providers.dart';
 import '../profile/profile_providers.dart';
-
-const _kLittleWords = <String>[
-  'Je pense à toi 🌸',
-  'Tu es mon petit soleil ☀️',
-  'Un gros câlin 🧸',
-  'Juste parce que je t’aime 💗',
-];
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -40,11 +36,84 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final Set<String> _animatedHeartIds = <String>{};
   final Set<String> _reconciling = <String>{};
   String? _notifUid;
+  StreamSubscription<RemoteMessage>? _openedAppSub;
+  bool _navigating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // App ouverte depuis une notification alors qu'elle était fermée.
+    FirebaseMessaging.instance.getInitialMessage().then((m) {
+      if (m != null) _handleNotificationTap(m);
+    });
+    // App en arrière-plan puis notification tapée.
+    _openedAppSub =
+        FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+  }
+
+  @override
+  void dispose() {
+    _openedAppSub?.cancel();
+    super.dispose();
+  }
+
+  /// Mémorise la cible d'ouverture demandée par le tap ; la navigation réelle
+  /// se fait dans build() une fois les proches chargés.
+  void _handleNotificationTap(RemoteMessage message) {
+    final data = message.data;
+    final type = (data['type'] ?? '').toString();
+    final fromUid = (data['fromUid'] ?? '').toString();
+    if (type == 'reply_reminder') {
+      // Relance : on ouvre l'écran d'envoi vers la personne (ou l'onglet
+      // « Recevoir » si la relance concernait plusieurs personnes).
+      ref.read(pendingNotificationTapProvider.notifier).set(fromUid);
+    } else if (type == 'heart') {
+      // Réception : on ouvre l'onglet « Recevoir » pour voir les cœurs reçus.
+      ref.read(pendingNotificationTapProvider.notifier).set('');
+    }
+  }
+
+  /// Consomme une cible en attente : ouvre l'écran d'envoi vers le proche
+  /// concerné, ou à défaut l'onglet « Recevoir ».
+  void _handlePendingTap(String pending, List<LovedOne>? people) {
+    if (_navigating) return;
+    // Pour une cible précise, on attend que la liste des proches soit prête.
+    if (pending.isNotEmpty && people == null) return;
+    _navigating = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(pendingNotificationTapProvider.notifier).clear();
+      if (!mounted) {
+        _navigating = false;
+        return;
+      }
+      LovedOne? target;
+      if (pending.isNotEmpty && people != null) {
+        for (final p in people) {
+          if (p.linkedUid == pending) {
+            target = p;
+            break;
+          }
+        }
+      }
+      if (target != null) {
+        _openSend(target);
+      } else {
+        setState(() => _tab = 1); // onglet « Recevoir »
+      }
+      _navigating = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final incomingCount =
         ref.watch(incomingRequestsProvider).value?.length ?? 0;
     final unseenHearts = ref.watch(unseenHeartsCountProvider);
+    final accent = ref.watch(themeAccentProvider).seed;
+    final pendingTap = ref.watch(pendingNotificationTapProvider);
+    if (pendingTap != null) {
+      _handlePendingTap(pendingTap, ref.watch(peopleProvider).value);
+    }
     final uid = ref.watch(authStateProvider).value?.uid;
     if (uid != _heartsUid) {
       _heartsUid = uid;
@@ -91,7 +160,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     icon: const Icon(Icons.favorite_rounded, size: 18),
                     label: const Text('Premium'),
-                    style: TextButton.styleFrom(foregroundColor: kPink),
+                    style: TextButton.styleFrom(foregroundColor: accent),
                   ),
                   Badge.count(
                     count: incomingCount,
@@ -99,14 +168,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: IconButton(
                       onPressed: () => context.push('/requests'),
                       icon: const Icon(Icons.notifications_none_rounded),
-                      color: kPink,
+                      color: accent,
                       tooltip: 'Demandes',
                     ),
                   ),
                   IconButton(
                     onPressed: () => context.push('/profile'),
                     icon: const Icon(Icons.account_circle_outlined),
-                    color: kPink,
+                    color: accent,
                     tooltip: 'Mon profil',
                   ),
                 ],
@@ -123,6 +192,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: HeartsCelebration(
                 key: ValueKey(_celebrationSeq),
                 count: _celebration!,
+                emojis: ref.watch(animationStyleProvider).emojis,
+                glow: accent,
                 onDone: () {
                   if (mounted) setState(() => _celebration = null);
                 },
@@ -876,6 +947,8 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
 
   @override
   Widget build(BuildContext context) {
+    final pack = ref.watch(wordPackProvider);
+    final accent = ref.watch(themeAccentProvider).seed;
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -927,11 +1000,11 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
                           width: 200,
                           height: 200,
                           decoration: BoxDecoration(
-                            color: kPink,
+                            color: accent,
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: kPink.withValues(alpha: .35),
+                                color: accent.withValues(alpha: .35),
                                 blurRadius: 28,
                                 spreadRadius: 8,
                               ),
@@ -966,11 +1039,11 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        for (final word in _kLittleWords)
+                        for (final word in pack.words)
                           ChoiceChip(
                             label: Text(word),
                             selected: _message.text == word,
-                            selectedColor: kPink.withValues(alpha: .2),
+                            selectedColor: accent.withValues(alpha: .2),
                             onSelected: (_) => _pickWord(word),
                           ),
                       ],
@@ -1014,7 +1087,7 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
                           : 'Envoyer $_count cœur${_count > 1 ? 's' : ''}'),
                 ),
                 style: FilledButton.styleFrom(
-                  backgroundColor: kPink,
+                  backgroundColor: accent,
                   minimumSize: const Size.fromHeight(56),
                 ),
               ),
@@ -1038,6 +1111,14 @@ class ReceivePage extends ConsumerWidget {
       for (final p in people)
         if (p.linkedUid != null && p.linkedUid!.isNotEmpty) p.linkedUid!: p.name,
     };
+    // Proche lié à chaque expéditeur (pour pouvoir lui répondre).
+    final personByUid = <String, LovedOne>{
+      for (final p in people)
+        if (p.linkedUid != null && p.linkedUid!.isNotEmpty) p.linkedUid!: p,
+    };
+    // Comptes supprimés : on ne propose pas d'y répondre.
+    final deleted =
+        ref.watch(deletedLinkedUidsProvider).value ?? const <String>{};
     return async.when(
       loading: () =>
           const Center(child: CircularProgressIndicator(color: kPink)),
@@ -1048,11 +1129,18 @@ class ReceivePage extends ConsumerWidget {
               textAlign: TextAlign.center),
         ),
       ),
-      data: (all) => _content(all, aliasByUid),
+      data: (all) =>
+          _content(context, all, aliasByUid, personByUid, deleted),
     );
   }
 
-  Widget _content(List<Heart> hearts, Map<String, String> aliasByUid) {
+  Widget _content(
+    BuildContext context,
+    List<Heart> hearts,
+    Map<String, String> aliasByUid,
+    Map<String, LovedOne> personByUid,
+    Set<String> deleted,
+  ) {
     final total = hearts.fold<int>(0, (sum, h) => sum + h.count);
     // Total de cœurs reçus par contact (expéditeur).
     final countByUid = <String, int>{};
@@ -1060,6 +1148,10 @@ class ReceivePage extends ConsumerWidget {
     for (final h in hearts) {
       countByUid[h.fromUid] = (countByUid[h.fromUid] ?? 0) + h.count;
       nameByUid[h.fromUid] = aliasByUid[h.fromUid] ?? h.fromName;
+    }
+    final heartsByUid = <String, List<Heart>>{};
+    for (final h in hearts) {
+      (heartsByUid[h.fromUid] ??= <Heart>[]).add(h);
     }
     final senders = countByUid.keys.toList()
       ..sort((a, b) => countByUid[b]!.compareTo(countByUid[a]!));
@@ -1112,32 +1204,19 @@ class ReceivePage extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 24),
-        if (senders.length > 1) ...[
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Par personne',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-          ),
-          const SizedBox(height: 12),
-          for (final uid in senders) ...[
-            _SenderTotalRow(
-              name: nameByUid[uid] ?? 'Quelqu\'un',
-              count: countByUid[uid]!,
+        for (final uid in senders) ...[
+          _SenderTotalRow(
+            name: nameByUid[uid] ?? 'Quelqu\'un',
+            count: countByUid[uid]!,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => _SenderHeartsPage(
+                  name: nameByUid[uid] ?? 'Quelqu\'un',
+                  hearts: heartsByUid[uid] ?? const <Heart>[],
+                  person: deleted.contains(uid) ? null : personByUid[uid],
+                ),
+              ),
             ),
-            const SizedBox(height: 8),
-          ],
-          const SizedBox(height: 16),
-        ],
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text('Tes cœurs reçus',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-        ),
-        const SizedBox(height: 12),
-        for (final h in hearts) ...[
-          _HeartTile(
-            heart: h,
-            displayName: aliasByUid[h.fromUid] ?? h.fromName,
           ),
           const SizedBox(height: 10),
         ],
@@ -1153,30 +1232,85 @@ String _heartDateLabel(DateTime dt) {
 }
 
 class _SenderTotalRow extends StatelessWidget {
-  const _SenderTotalRow({required this.name, required this.count});
+  const _SenderTotalRow({required this.name, required this.count, this.onTap});
   final String name;
   final int count;
+  final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
     final s = count > 1 ? 's' : '';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
         borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text(
+                '$count cœur$s 💗',
+                style: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w800, color: kPink),
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.chevron_right_rounded, color: kInk),
+            ],
+          ),
+        ),
       ),
-      child: Row(
+    );
+  }
+}
+
+/// Détail : toutes les réceptions de cœurs d'une même personne.
+class _SenderHeartsPage extends StatelessWidget {
+  const _SenderHeartsPage({
+    required this.name,
+    required this.hearts,
+    this.person,
+  });
+  final String name;
+  final List<Heart> hearts;
+  final LovedOne? person;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = hearts.fold<int>(0, (sum, h) => sum + h.count);
+    final target = person;
+    void reply() {
+      if (target == null) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => SendLovePage(person: target)),
+      );
+    }
+    return Scaffold(
+      appBar: AppBar(title: Text('Cœurs de $name')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
         children: [
-          Expanded(
-            child: Text(
-              name,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-          ),
           Text(
-            '$count cœur$s 💗',
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: kPink),
+            '$total cœur${total > 1 ? 's' : ''} reçu${total > 1 ? 's' : ''} '
+            'de $name',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
           ),
+          const SizedBox(height: 16),
+          for (final h in hearts) ...[
+            _HeartTile(
+              heart: h,
+              displayName: name,
+              onReply: (!h.seen && target != null) ? reply : null,
+            ),
+            const SizedBox(height: 10),
+          ],
         ],
       ),
     );
@@ -1184,210 +1318,452 @@ class _SenderTotalRow extends StatelessWidget {
 }
 
 class _HeartTile extends StatelessWidget {
-  const _HeartTile({required this.heart, required this.displayName});
+  const _HeartTile({
+    required this.heart,
+    required this.displayName,
+    this.onReply,
+  });
   final Heart heart;
   final String displayName;
+
+  /// Si non nul, la carte devient cliquable pour répondre à ce contact.
+  final VoidCallback? onReply;
+
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: heart.seen ? Colors.white : kPink.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(
-        color: heart.seen ? Colors.transparent : kPink,
-        width: 1.5,
-      ),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            if (!heart.seen)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: kPink,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text('nouveau',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700)),
-              ),
-            const Spacer(),
-            if (heart.createdAt != null)
-              Text(
-                _heartDateLabel(heart.createdAt!),
-                style: const TextStyle(fontSize: 12, color: Colors.black54),
-              ),
-          ],
+  Widget build(BuildContext context) {
+    final card = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: heart.seen ? Colors.white : kPink.withValues(alpha: .12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: heart.seen ? Colors.transparent : kPink,
+          width: 1.5,
         ),
-        const SizedBox(height: 6),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('💌', style: TextStyle(fontSize: 28)),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(displayName,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w800, fontSize: 16)),
-                  const SizedBox(height: 2),
-                  Text(
-                      't\u2019envoie ${heart.count} c\u0153ur${heart.count > 1 ? 's' : ''} \ud83d\udc97'),
-                  if (heart.message.isNotEmpty) ...[
-                    const SizedBox(height: 4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (!heart.seen)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: kPink,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text('nouveau',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700)),
+                ),
+              const Spacer(),
+              if (heart.createdAt != null)
+                Text(
+                  _heartDateLabel(heart.createdAt!),
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('💌', style: TextStyle(fontSize: 28)),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(displayName,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 16)),
+                    const SizedBox(height: 2),
                     Text(
-                      '\u00ab ${heart.message} \u00bb',
-                      style: const TextStyle(
-                          fontStyle: FontStyle.italic, color: kInk),
-                    ),
+                        't’envoie ${heart.count} cœur${heart.count > 1 ? 's' : ''} 💗'),
+                    if (heart.message.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '« ${heart.message} »',
+                        style: const TextStyle(
+                            fontStyle: FontStyle.italic, color: kInk),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
+            ],
+          ),
+          if (onReply != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: const [
+                Text('Répondre en cœurs',
+                    style: TextStyle(
+                        color: kPink, fontWeight: FontWeight.w800)),
+                SizedBox(width: 4),
+                Text('💌'),
+                Icon(Icons.chevron_right_rounded, color: kPink, size: 20),
+              ],
             ),
           ],
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+    if (onReply == null) return card;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onReply,
+        child: card,
+      ),
+    );
+  }
 }
 
-class PremiumPage extends StatefulWidget {
+class PremiumPage extends ConsumerStatefulWidget {
   const PremiumPage({super.key});
   @override
-  State<PremiumPage> createState() => _PremiumPageState();
+  ConsumerState<PremiumPage> createState() => _PremiumPageState();
 }
 
-class _PremiumPageState extends State<PremiumPage> {
-  var _annual = true;
+class _PremiumPageState extends ConsumerState<PremiumPage> {
+  int _previewSeq = 0;
+  bool _playingPreview = false;
+
+  void _testAnimation() {
+    setState(() {
+      _playingPreview = true;
+      _previewSeq++;
+    });
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(backgroundColor: kCream, title: const Text('Cœur à cœur+')),
-    body: ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        const Center(child: Text('💗', style: TextStyle(fontSize: 84))),
-        const SizedBox(height: 8),
-        const Text(
-          'Un petit monde\nsans publicité',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 10),
-        const Text(
-          'Parce que les moments d’amour méritent de rester doux.',
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 28),
-        const _Benefit(Icons.favorite_rounded, 'Tous tes cœurs et tes proches'),
-        const _Benefit(
-          Icons.auto_awesome_rounded,
-          'Toutes les animations de base',
-        ),
-        const _Benefit(Icons.block_rounded, 'Aucune publicité'),
-        const SizedBox(height: 18),
-        _Plan(
-          'Mensuel',
-          'Flexible',
-          '2,99 € / mois',
-          !_annual,
-          () => setState(() => _annual = false),
-        ),
-        const SizedBox(height: 12),
-        _Plan(
-          'Annuel',
-          'Économise · 2,08 € / mois',
-          '24,99 € / an',
-          _annual,
-          () => setState(() => _annual = true),
-        ),
-        const SizedBox(height: 22),
-        FilledButton(
-          onPressed: () => _comingSoon(context),
-          style: FilledButton.styleFrom(
-            backgroundColor: kPink,
-            minimumSize: const Size.fromHeight(56),
+  Widget build(BuildContext context) {
+    final accent = ref.watch(themeAccentProvider);
+    final animIndex = ref.watch(animationStyleIndexProvider);
+    final packIndex = ref.watch(wordPackIndexProvider);
+    final themeIndex = ref.watch(themeAccentIndexProvider);
+    final anim = kAnimationStyles[animIndex];
+    final pack = kWordPacks[packIndex];
+    final seed = accent.seed;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Cœur à cœur+'),
+      ),
+      body: Stack(
+        children: [
+          ListView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
+            children: [
+              Center(
+                child: Text(accent.emoji, style: const TextStyle(fontSize: 72)),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Personnalise ton\npetit monde',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: seed.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  children: [
+                    const Text('🎁', style: TextStyle(fontSize: 22)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Version découverte : tout est débloqué pour que tu '
+                        'puisses essayer librement.',
+                        style: TextStyle(
+                          color: kInk,
+                          fontWeight: FontWeight.w600,
+                          height: 1.25,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 26),
+
+              // ---- Thème ----
+              const _PremiumSection('🎨', 'Thème'),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 14,
+                runSpacing: 14,
+                children: [
+                  for (var i = 0; i < kThemeAccents.length; i++)
+                    _AccentSwatch(
+                      accent: kThemeAccents[i],
+                      selected: i == themeIndex,
+                      onTap: () =>
+                          ref.read(themeAccentIndexProvider.notifier).select(i),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 28),
+
+              // ---- Animation ----
+              const _PremiumSection('✨', 'Animation à la réception'),
+              const SizedBox(height: 12),
+              for (var i = 0; i < kAnimationStyles.length; i++)
+                _ChoiceTile(
+                  selected: i == animIndex,
+                  seed: seed,
+                  onTap: () => ref
+                      .read(animationStyleIndexProvider.notifier)
+                      .select(i),
+                  title: kAnimationStyles[i].name,
+                  trailing: Text(
+                    kAnimationStyles[i].emojis.take(4).join(' '),
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _testAnimation,
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: Text('Tester « ${anim.name} »'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: seed,
+                  side: BorderSide(color: seed),
+                  minimumSize: const Size.fromHeight(48),
+                ),
+              ),
+              const SizedBox(height: 28),
+
+              // ---- Packs de petits mots ----
+              const _PremiumSection('💬', 'Packs de petits mots'),
+              const SizedBox(height: 12),
+              for (var i = 0; i < kWordPacks.length; i++)
+                _ChoiceTile(
+                  selected: i == packIndex,
+                  seed: seed,
+                  onTap: () =>
+                      ref.read(wordPackIndexProvider.notifier).select(i),
+                  title: '${kWordPacks[i].emoji}  ${kWordPacks[i].name}',
+                  subtitle: kWordPacks[i].words.take(2).join(' · '),
+                ),
+              const SizedBox(height: 10),
+              Text(
+                'Aperçu de « ${pack.name} » :',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final w in pack.words)
+                    Chip(
+                      label: Text(w),
+                      backgroundColor: seed.withValues(alpha: .12),
+                      side: BorderSide.none,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 28),
+
+              // ---- Proches illimités ----
+              const _PremiumSection('♾️', 'Proches illimités'),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, color: seed),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Déjà actif : ajoute autant de proches que tu veux.',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 30),
+              const Divider(),
+              const SizedBox(height: 14),
+              const Text(
+                'Bientôt : passe à Premium pour garder tout ça et retirer la '
+                'publicité.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: () => _comingSoon(context),
+                style: FilledButton.styleFrom(
+                  backgroundColor: seed,
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                child: const Text('En savoir plus 💕'),
+              ),
+            ],
           ),
-          child: const Text('Continuer vers Premium 💕'),
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'Annulable à tout moment · Conditions et confidentialité',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12),
-        ),
-      ],
-    ),
-  );
+          if (_playingPreview)
+            Positioned.fill(
+              child: HeartsCelebration(
+                key: ValueKey(_previewSeq),
+                count: 14,
+                emojis: anim.emojis,
+                glow: seed,
+                onDone: () {
+                  if (mounted) setState(() => _playingPreview = false);
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
-class _Benefit extends StatelessWidget {
-  const _Benefit(this.icon, this.text);
-  final IconData icon;
-  final String text;
+class _PremiumSection extends StatelessWidget {
+  const _PremiumSection(this.emoji, this.title);
+  final String emoji, title;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 7),
-    child: Row(
-      children: [
-        Icon(icon, color: kPink),
-        const SizedBox(width: 12),
-        Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
-      ],
-    ),
+  Widget build(BuildContext context) => Row(
+    children: [
+      Text(emoji, style: const TextStyle(fontSize: 20)),
+      const SizedBox(width: 8),
+      Text(
+        title,
+        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+      ),
+    ],
   );
 }
 
-class _Plan extends StatelessWidget {
-  const _Plan(this.title, this.subtitle, this.price, this.selected, this.onTap);
-  final String title, subtitle, price;
+class _AccentSwatch extends StatelessWidget {
+  const _AccentSwatch({
+    required this.accent,
+    required this.selected,
+    required this.onTap,
+  });
+  final ThemeAccent accent;
   final bool selected;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => Material(
-    color: selected ? kPink.withValues(alpha: .12) : Colors.white,
-    borderRadius: BorderRadius.circular(20),
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? kPink : Colors.transparent,
-            width: 2,
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 54,
+          height: 54,
+          decoration: BoxDecoration(
+            color: accent.seed,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected ? kInk : Colors.transparent,
+              width: 3,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: accent.seed.withValues(alpha: .35),
+                blurRadius: 10,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: selected
+              ? const Icon(Icons.check_rounded, color: Colors.white)
+              : null,
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: 66,
+          child: Text(
+            accent.name,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+            ),
           ),
         ),
-        child: Row(
-          children: [
-            Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_off_rounded,
-              color: selected ? kPink : kInk,
+      ],
+    ),
+  );
+}
+
+class _ChoiceTile extends StatelessWidget {
+  const _ChoiceTile({
+    required this.selected,
+    required this.seed,
+    required this.onTap,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+  });
+  final bool selected;
+  final Color seed;
+  final VoidCallback onTap;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Material(
+      color: selected ? seed.withValues(alpha: .12) : Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? seed : Colors.black12,
+              width: selected ? 2 : 1,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  Text(subtitle),
-                ],
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_off_rounded,
+                color: selected ? seed : kInk,
               ),
-            ),
-            Text(price, style: const TextStyle(fontWeight: FontWeight.w800)),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: const TextStyle(fontSize: 12.5),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+            ],
+          ),
         ),
       ),
     ),
@@ -1423,10 +1799,18 @@ void _sent(BuildContext context, int count, String name) => showDialog<void>(
 /// Overlay de celebration : un compteur central qui pulse, et des coeurs qui
 /// montent puis s'estompent. Joue une fois puis appelle [onDone].
 class HeartsCelebration extends StatefulWidget {
-  const HeartsCelebration({super.key, required this.count, required this.onDone});
+  const HeartsCelebration({
+    super.key,
+    required this.count,
+    required this.onDone,
+    this.emojis = const ['💗', '💖', '💕', '❤️', '💞', '🩷'],
+    this.glow = kPink,
+  });
 
   final int count;
   final VoidCallback onDone;
+  final List<String> emojis;
+  final Color glow;
 
   @override
   State<HeartsCelebration> createState() => _HeartsCelebrationState();
@@ -1434,8 +1818,6 @@ class HeartsCelebration extends StatefulWidget {
 
 class _HeartsCelebrationState extends State<HeartsCelebration>
     with SingleTickerProviderStateMixin {
-  static const _emojis = ['💗', '💖', '💕', '❤️', '💞', '🩷'];
-
   late final AnimationController _controller;
   late final List<_FloatingHeart> _hearts;
 
@@ -1451,7 +1833,7 @@ class _HeartsCelebrationState extends State<HeartsCelebration>
         drift: (rand.nextDouble() - 0.5) * 0.18,
         delay: rand.nextDouble() * 0.4,
         scale: 0.7 + rand.nextDouble() * 0.9,
-        emoji: _emojis[rand.nextInt(_emojis.length)],
+        emoji: widget.emojis[rand.nextInt(widget.emojis.length)],
       ),
     );
     _controller = AnimationController(
@@ -1522,7 +1904,7 @@ class _HeartsCelebrationState extends State<HeartsCelebration>
               borderRadius: BorderRadius.circular(30),
               boxShadow: [
                 BoxShadow(
-                  color: kPink.withValues(alpha: .35),
+                  color: widget.glow.withValues(alpha: .35),
                   blurRadius: 28,
                   spreadRadius: 6,
                 ),

@@ -17,7 +17,6 @@ class ProfileScreen extends ConsumerWidget {
     final profileAsync = ref.watch(userProfileProvider);
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: kCream,
         elevation: 0,
         title: const Text('Mon profil'),
       ),

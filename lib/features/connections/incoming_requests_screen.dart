@@ -12,7 +12,6 @@ class IncomingRequestsScreen extends ConsumerWidget {
     final async = ref.watch(incomingRequestsProvider);
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: kCream,
         elevation: 0,
         title: const Text('Demandes de connexion'),
       ),

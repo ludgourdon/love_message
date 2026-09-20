@@ -3,8 +3,10 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 import 'app.dart';
+import 'features/premium/premium_prefs.dart';
 
 /// Handler des messages reçus quand l'app est en arrière-plan / fermée.
 @pragma('vm:entry-point')
@@ -30,5 +32,13 @@ Future<void> main() async {
     sound: true,
   );
 
-  runApp(const ProviderScope(child: MyApp()));
+  // Préférences locales (thème / animation / pack de mots premium).
+  final prefs = await SharedPreferences.getInstance();
+
+  runApp(
+    ProviderScope(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+      child: const MyApp(),
+    ),
+  );
 }

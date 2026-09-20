@@ -10,3 +10,19 @@ final notificationsServiceProvider = Provider<NotificationsService>(
     FirebaseFirestore.instance,
   ),
 );
+
+/// Cible d'ouverture demandée par un tap sur une notification.
+///  - `null`  : rien en attente
+///  - `''`    : ouvrir l'onglet « Recevoir »
+///  - `<uid>` : ouvrir l'écran d'envoi vers le proche lié à cet uid
+class PendingNotificationTapNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void set(String? value) => state = value;
+  void clear() => state = null;
+}
+
+final pendingNotificationTapProvider =
+    NotifierProvider<PendingNotificationTapNotifier, String?>(
+  PendingNotificationTapNotifier.new,
+);
