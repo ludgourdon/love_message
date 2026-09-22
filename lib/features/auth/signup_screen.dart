@@ -23,6 +23,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   bool _loading = false;
   bool _obscure = true;
   String? _error;
+  bool _emailTaken = false;
 
   @override
   void dispose() {
@@ -41,6 +42,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _emailTaken = false;
     });
     try {
       await auth.register(
@@ -53,7 +55,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       // découvrable et ne peut donc pas être ajouté.
       // La redirection go_router s'occupe de la navigation vers l'accueil.
     } on FirebaseAuthException catch (e) {
-      setState(() => _error = authErrorMessage(e));
+      setState(() {
+        _error = authErrorMessage(e);
+        _emailTaken = e.code == 'email-already-in-use';
+      });
     } catch (_) {
       setState(() => _error = 'Une erreur est survenue. Réessaie.');
     } finally {
@@ -142,6 +147,14 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     style: const TextStyle(color: Colors.red),
                     textAlign: TextAlign.center,
                   ),
+                  if (_emailTaken) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _loading ? null : () => context.pop(),
+                      icon: const Icon(Icons.login_rounded),
+                      label: const Text('Se connecter à ce compte'),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 20),
                 FilledButton(

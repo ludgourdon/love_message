@@ -16,6 +16,13 @@ final receivedHeartsProvider = StreamProvider<List<Heart>>((ref) {
   return ref.watch(heartsRepositoryProvider).watchReceived(user.uid);
 });
 
+/// Coeurs ENVOYES par l'utilisateur connecte, en temps reel.
+final sentHeartsProvider = StreamProvider<List<Heart>>((ref) {
+  final user = ref.watch(authStateProvider).value;
+  if (user == null) return Stream<List<Heart>>.value(const []);
+  return ref.watch(heartsRepositoryProvider).watchSent(user.uid);
+});
+
 /// Nombre de coeurs recus non encore vus (pour le badge de l'onglet Recevoir).
 final unseenHeartsCountProvider = Provider<int>((ref) {
   final hearts = ref.watch(receivedHeartsProvider).value ?? const [];

@@ -45,6 +45,12 @@ class HeartsRepository {
         return list;
       });
 
+  /// Coeurs ENVOYES par cet utilisateur (pour calculer les liens/streaks).
+  Stream<List<Heart>> watchSent(String uid) => _col
+      .where('fromUid', isEqualTo: uid)
+      .snapshots()
+      .map((snap) => snap.docs.map(Heart.fromDoc).toList());
+
   /// Marque comme vus tous les coeurs recus non lus.
   Future<void> markAllSeen(String uid) async {
     final snap = await _col

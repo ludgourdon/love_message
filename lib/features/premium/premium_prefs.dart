@@ -90,6 +90,19 @@ const kWordPacks = <WordPack>[
   ]),
 ];
 
+/// Style visuel du "lien" (jeu de la flamme du lien) : flamme qui grandit
+/// ou fleur qui s'ouvre.
+class BondStyle {
+  const BondStyle(this.name, this.emoji);
+  final String name;
+  final String emoji;
+}
+
+const kBondStyles = <BondStyle>[
+  BondStyle('Flamme', '🔥'),
+  BondStyle('Fleur', '🌸'),
+];
+
 /// Injecté depuis main() après préchargement.
 final sharedPreferencesProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError('SharedPreferences non initialisées'),
@@ -125,6 +138,9 @@ final animationStyleIndexProvider =
 final wordPackIndexProvider = NotifierProvider<PremiumChoiceNotifier, int>(
   () => PremiumChoiceNotifier('premium.pack', kWordPacks.length),
 );
+final bondStyleIndexProvider = NotifierProvider<PremiumChoiceNotifier, int>(
+  () => PremiumChoiceNotifier('premium.bond', kBondStyles.length),
+);
 
 /// Valeurs dérivées, pratiques à consommer dans l'UI.
 final themeAccentProvider = Provider<ThemeAccent>(
@@ -135,4 +151,7 @@ final animationStyleProvider = Provider<AnimationStyle>(
 );
 final wordPackProvider = Provider<WordPack>(
   (ref) => kWordPacks[ref.watch(wordPackIndexProvider)],
+);
+final bondStyleProvider = Provider<BondStyle>(
+  (ref) => kBondStyles[ref.watch(bondStyleIndexProvider)],
 );

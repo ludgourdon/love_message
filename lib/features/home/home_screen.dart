@@ -15,6 +15,7 @@ import '../people/loved_one.dart';
 import '../people/people_providers.dart';
 import '../people/person_editor.dart';
 import '../blocks/blocks_providers.dart';
+import '../bond/bond_streak.dart';
 import '../notifications/notifications_providers.dart';
 import '../ads/ad_banner.dart';
 import '../premium/premium_prefs.dart';
@@ -433,18 +434,31 @@ class WorldPage extends ConsumerWidget {
     final blocked = ref.watch(blockedUidsProvider).value ?? const <String>{};
     final deletedAccounts =
         ref.watch(deletedLinkedUidsProvider).value ?? const <String>{};
+    final streaks = ref.watch(bondStreaksProvider);
+    final bondStyleIndex = ref.watch(bondStyleIndexProvider);
+    final accent = ref.watch(themeAccentProvider);
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
       children: [
         const _VerifyEmailBanner(),
-        const Text(
+        Text(
           'Mon petit monde',
-          style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800),
+          style: TextStyle(
+            fontSize: 27,
+            fontWeight: FontWeight.w700,
+            height: 1.1,
+            letterSpacing: -0.2,
+            color: accent.seed,
+          ),
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'À qui veux-tu envoyer de l’amour aujourd’hui ?',
-          style: TextStyle(fontSize: 16),
+        const SizedBox(height: 10),
+        Text(
+          'Les personnes qui comptent, réunies ici.',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+            color: kInk.withValues(alpha: .70),
+          ),
         ),
         const SizedBox(height: 24),
         peopleAsync.when(
@@ -475,6 +489,11 @@ class WorldPage extends ConsumerWidget {
                         blocked.contains(person.linkedUid),
                     accountDeleted: person.linkedUid != null &&
                         deletedAccounts.contains(person.linkedUid),
+                    streak: (person.linkedUid != null &&
+                            !deletedAccounts.contains(person.linkedUid))
+                        ? streaks[person.linkedUid]
+                        : null,
+                    bondStyleIndex: bondStyleIndex,
                     onTap: () {
                       if (person.linkedUid != null &&
                           deletedAccounts.contains(person.linkedUid)) {
@@ -664,6 +683,8 @@ class _PersonCard extends StatelessWidget {
     this.accountDeleted = false,
     this.onBlock,
     this.onUnblock,
+    this.streak,
+    this.bondStyleIndex = 0,
   });
   final LovedOne person;
   final VoidCallback onTap;
@@ -674,6 +695,8 @@ class _PersonCard extends StatelessWidget {
   final bool accountDeleted;
   final VoidCallback? onBlock;
   final VoidCallback? onUnblock;
+  final BondStreak? streak;
+  final int bondStyleIndex;
 
   void _showMenu(BuildContext context) => showModalBottomSheet<void>(
     context: context,
@@ -818,6 +841,10 @@ class _PersonCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (streak != null && streak!.days > 0) ...[
+                _BondBadge(streak: streak!, styleIndex: bondStyleIndex),
+                const SizedBox(width: 4),
+              ],
               IconButton(
                 onPressed: () => _showMenu(context),
                 icon: const Icon(Icons.more_vert, color: kInk),
@@ -825,6 +852,58 @@ class _PersonCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Choisit l'emoji du lien selon le style (0 = flamme, 1 = fleur qui s'ouvre)
+/// et le nombre de jours.
+String _bondEmojiFor(int styleIndex, int days) {
+  if (styleIndex == 1) {
+    if (days >= 30) return '🌺';
+    if (days >= 14) return '🌸';
+    if (days >= 7) return '🌷';
+    if (days >= 3) return '🌿';
+    return '🌱';
+  }
+  return '🔥'; // la flamme grandit via la taille
+}
+
+/// Petit badge de lien affiché sur la carte d'un proche.
+class _BondBadge extends StatelessWidget {
+  const _BondBadge({required this.streak, required this.styleIndex});
+  final BondStreak streak;
+  final int styleIndex;
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final active = streak.completeToday;
+    final emoji = _bondEmojiFor(styleIndex, streak.days);
+    // La flamme grandit avec les jours ; la fleur garde une taille stable
+    // (c'est l'emoji qui "s'ouvre").
+    final size =
+        styleIndex == 0 ? 18.0 + streak.days.clamp(0, 12) * 1.3 : 26.0;
+    return Tooltip(
+      message: active
+          ? 'Lien entretenu aujourd\'hui'
+          : 'À entretenir aujourd\'hui',
+      child: Opacity(
+        opacity: active ? 1 : .55,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(emoji, style: TextStyle(fontSize: size)),
+            Text(
+              '${streak.days} j',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: active ? primary : Colors.black54,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -879,6 +958,21 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
     final messenger = ScaffoldMessenger.of(context);
     final s = _count > 1 ? 's' : '';
     final message = _message.text.trim();
+
+    // Email obligatoirement vérifié pour envoyer des cœurs.
+    final verified =
+        await ref.read(authRepositoryProvider).reloadAndCheckVerified();
+    ref.read(emailVerifiedProvider.notifier).set(verified);
+    if (!verified) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Valide ton adresse email avant d\'envoyer des cœurs '
+              '(un lien t\'a été envoyé à l\'inscription).'),
+        ),
+      );
+      return;
+    }
 
     final linkedUid = person.linkedUid;
 
@@ -1119,6 +1213,7 @@ class ReceivePage extends ConsumerWidget {
     // Comptes supprimés : on ne propose pas d'y répondre.
     final deleted =
         ref.watch(deletedLinkedUidsProvider).value ?? const <String>{};
+    final accentSeed = ref.watch(themeAccentProvider).seed;
     return async.when(
       loading: () =>
           const Center(child: CircularProgressIndicator(color: kPink)),
@@ -1129,8 +1224,8 @@ class ReceivePage extends ConsumerWidget {
               textAlign: TextAlign.center),
         ),
       ),
-      data: (all) =>
-          _content(context, all, aliasByUid, personByUid, deleted),
+      data: (all) => _content(
+          context, all, aliasByUid, personByUid, deleted, accentSeed),
     );
   }
 
@@ -1140,6 +1235,7 @@ class ReceivePage extends ConsumerWidget {
     Map<String, String> aliasByUid,
     Map<String, LovedOne> personByUid,
     Set<String> deleted,
+    Color accentSeed,
   ) {
     final total = hearts.fold<int>(0, (sum, h) => sum + h.count);
     // Total de cœurs reçus par contact (expéditeur).
@@ -1180,8 +1276,16 @@ class ReceivePage extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
       children: [
-        const Text('Une pluie d’amour',
-            style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800)),
+        Text(
+          'Une pluie d’amour',
+          style: TextStyle(
+            fontSize: 27,
+            fontWeight: FontWeight.w700,
+            height: 1.1,
+            letterSpacing: -0.2,
+            color: accentSeed,
+          ),
+        ),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(24),
@@ -1450,6 +1554,7 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
     final animIndex = ref.watch(animationStyleIndexProvider);
     final packIndex = ref.watch(wordPackIndexProvider);
     final themeIndex = ref.watch(themeAccentIndexProvider);
+    final bondIndex = ref.watch(bondStyleIndexProvider);
     final anim = kAnimationStyles[animIndex];
     final pack = kWordPacks[packIndex];
     final seed = accent.seed;
@@ -1576,6 +1681,28 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                     ),
                 ],
               ),
+              const SizedBox(height: 28),
+
+              // ---- Style du lien ----
+              const _PremiumSection('🔥', 'Style du lien'),
+              const SizedBox(height: 6),
+              const Text(
+                'La récompense qui grandit quand vous vous envoyez des cœurs '
+                'chaque jour, tous les deux.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              for (var i = 0; i < kBondStyles.length; i++)
+                _ChoiceTile(
+                  selected: i == bondIndex,
+                  seed: seed,
+                  onTap: () =>
+                      ref.read(bondStyleIndexProvider.notifier).select(i),
+                  title: '${kBondStyles[i].emoji}  ${kBondStyles[i].name}',
+                  subtitle: i == 0
+                      ? 'Une flamme qui grandit jour après jour'
+                      : 'Une fleur qui s\'ouvre peu à peu',
+                ),
               const SizedBox(height: 28),
 
               // ---- Proches illimités ----

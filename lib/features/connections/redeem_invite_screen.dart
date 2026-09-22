@@ -41,7 +41,7 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
   Future<void> _submit() async {
     final code = _extractCode(_code.text);
     if (code.isEmpty) {
-      setState(() => _error = 'Entre le code d\'invitation que tu as recu.');
+      setState(() => _error = 'Entre le code d\'invitation que tu as reçu.');
       return;
     }
     final me = ref.read(authStateProvider).value;
@@ -116,14 +116,14 @@ class _RedeemInviteScreenState extends ConsumerState<RedeemInviteScreen> {
               const Center(child: Text('💌', style: TextStyle(fontSize: 64))),
               const SizedBox(height: 16),
               const Text(
-                'Connecte-toi à la personne qui t\'a invite',
+                'Connecte-toi à la personne qui t\'a invité',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 8),
               const Text(
                 'Colle ici le code (ou le lien) que tu as reçu. Vous serez '
-                'ajoutes automatiquement dans vos petits mondes respectifs.',
+                'ajoutés automatiquement dans vos petits mondes respectifs.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: kInk),
               ),
