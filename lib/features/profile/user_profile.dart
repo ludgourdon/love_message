@@ -10,6 +10,10 @@ class UserProfile {
     this.username,
     this.usernameLower,
     this.createdAt,
+    this.birthdayDay,
+    this.birthdayMonth,
+    this.birthdayYear,
+    this.birthdayRemindersEnabled = true,
   });
 
   final String uid;
@@ -19,6 +23,12 @@ class UserProfile {
   final String? username;
   final String? usernameLower;
   final DateTime? createdAt;
+  final int? birthdayDay;
+  final int? birthdayMonth;
+  final int? birthdayYear;
+  final bool birthdayRemindersEnabled;
+
+  bool get hasBirthday => birthdayDay != null && birthdayMonth != null;
 
   factory UserProfile.fromMap(String uid, Map<String, dynamic> map) {
     return UserProfile(
@@ -31,6 +41,11 @@ class UserProfile {
       username: map['username'] as String?,
       usernameLower: map['usernameLower'] as String?,
       createdAt: (map['createdAt'] as Timestamp?)?.toDate(),
+      birthdayDay: (map['birthdayDay'] as num?)?.toInt(),
+      birthdayMonth: (map['birthdayMonth'] as num?)?.toInt(),
+      birthdayYear: (map['birthdayYear'] as num?)?.toInt(),
+      birthdayRemindersEnabled:
+          (map['birthdayRemindersEnabled'] as bool?) ?? true,
     );
   }
 }

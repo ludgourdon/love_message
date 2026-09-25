@@ -54,6 +54,12 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Règles R8/ProGuard : conserve WorkManager/Room (tirés par AdMob)
+            // pour éviter le crash "Failed to create WorkDatabase" en release.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

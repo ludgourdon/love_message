@@ -22,4 +22,10 @@ class BlocksRepository {
 
   Future<void> unblock(String uid, String blockedUid) =>
       _col(uid).doc(blockedUid).delete();
+
+  /// Indique si [otherUid] a bloqué [myUid] (lecture du seul doc me concernant).
+  Future<bool> isBlockedBy(String otherUid, String myUid) async {
+    final snap = await _col(otherUid).doc(myUid).get();
+    return snap.exists;
+  }
 }

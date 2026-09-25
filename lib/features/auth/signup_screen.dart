@@ -1,11 +1,14 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../theme.dart';
 import 'auth_errors.dart';
 import 'auth_providers.dart';
+import '../profile/birthday_field.dart';
 
 class SignupScreen extends ConsumerStatefulWidget {
   const SignupScreen({super.key});
@@ -24,9 +27,25 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   bool _obscure = true;
   String? _error;
   bool _emailTaken = false;
+  int? _bDay;
+  int? _bMonth;
+  int? _bYear;
+
+  static const _cguUrl = 'https://love-message-2835b.web.app/cgu';
+  static const _privacyUrl = 'https://love-message-2835b.web.app/privacy';
+  late final TapGestureRecognizer _tapCgu =
+      TapGestureRecognizer()..onTap = () => _openUrl(_cguUrl);
+  late final TapGestureRecognizer _tapPrivacy =
+      TapGestureRecognizer()..onTap = () => _openUrl(_privacyUrl);
+
+  Future<void> _openUrl(String url) async {
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
 
   @override
   void dispose() {
+    _tapCgu.dispose();
+    _tapPrivacy.dispose();
     _name.dispose();
     _email.dispose();
     _password.dispose();
@@ -34,8 +53,40 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     super.dispose();
   }
 
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    final initial = (_bDay != null && _bMonth != null && _bYear != null)
+        ? DateTime(_bYear!, _bMonth!, _bDay!)
+        : DateTime(now.year - 18, now.month, now.day);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1900),
+      lastDate: now,
+      initialDatePickerMode: DatePickerMode.year,
+      helpText: 'Date de naissance',
+    );
+    if (picked != null) {
+      setState(() {
+        _bDay = picked.day;
+        _bMonth = picked.month;
+        _bYear = picked.year;
+      });
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    final age = ageFrom(_bDay, _bMonth, _bYear);
+    if (age == null) {
+      setState(() => _error = 'Renseigne ta date de naissance complète.');
+      return;
+    }
+    if (age < 15) {
+      setState(() => _error =
+          'Tu dois avoir au moins 15 ans pour créer un compte.');
+      return;
+    }
     // Capture avant tout await : la redirection go_router detruit cet ecran
     // des la creation du compte, donc `ref` ne serait plus utilisable ensuite.
     final auth = ref.read(authRepositoryProvider);
@@ -49,6 +100,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             email: _email.text,
             password: _password.text,
             displayName: _name.text,
+            birthdayDay: _bDay!,
+            birthdayMonth: _bMonth!,
+            birthdayYear: _bYear!,
           );
       // Le nom d'utilisateur n'est attribué qu'après vérification de l'email
       // (voir la bannière sur l'accueil) : un compte non vérifié n'est pas
@@ -140,6 +194,26 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   validator: (v) =>
                       v != _password.text ? 'Les mots de passe ne correspondent pas' : null,
                 ),
+                const SizedBox(height: 14),
+                InkWell(
+                  onTap: _pickDob,
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Date de naissance',
+                      prefixIcon: Icon(Icons.cake_outlined),
+                      border: OutlineInputBorder(),
+                    ),
+                    child: Text(
+                      dobLabel(_bDay, _bMonth, _bYear) ?? 'Choisir…',
+                      style: TextStyle(
+                        color:
+                            (_bDay != null && _bMonth != null && _bYear != null)
+                                ? kInk
+                                : Colors.black54,
+                      ),
+                    ),
+                  ),
+                ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   Text(
@@ -173,6 +247,31 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                           ),
                         )
                       : const Text('Créer mon compte'),
+                ),
+                const SizedBox(height: 10),
+                Text.rich(
+                  TextSpan(
+                    style: const TextStyle(fontSize: 12.5, color: kInk),
+                    children: [
+                      const TextSpan(
+                          text: 'En créant ton compte, tu acceptes les '),
+                      TextSpan(
+                        text: 'Conditions d\'utilisation',
+                        style: const TextStyle(
+                            color: kPink, fontWeight: FontWeight.w700),
+                        recognizer: _tapCgu,
+                      ),
+                      const TextSpan(text: ' et la '),
+                      TextSpan(
+                        text: 'Politique de confidentialité',
+                        style: const TextStyle(
+                            color: kPink, fontWeight: FontWeight.w700),
+                        recognizer: _tapPrivacy,
+                      ),
+                      const TextSpan(text: '.'),
+                    ],
+                  ),
+                  textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Row(

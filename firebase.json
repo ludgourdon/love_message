@@ -51,6 +51,22 @@
       {
         "source": "/privacy",
         "destination": "/privacy.html"
+      },
+      {
+        "source": "/mentions",
+        "destination": "/mentions-legales.html"
+      },
+      {
+        "source": "/suppression-compte",
+        "destination": "/suppression-compte.html"
+      },
+      {
+        "source": "/delete-account",
+        "destination": "/suppression-compte.html"
+      },
+      {
+        "source": "/cgu",
+        "destination": "/cgu.html"
       }
     ]
   },

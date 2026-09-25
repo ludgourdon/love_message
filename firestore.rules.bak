@@ -7,8 +7,8 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
       // Liste des comptes bloqués : écrite uniquement par leur propriétaire.
-      // Lecture aussi par la personne concernée (blockedUid) pour savoir
-      // qu'elle a été bloquée (doc la concernant uniquement).
+      // Lecture autorisée aussi à la personne concernée (blockedUid) pour
+      // qu'elle puisse savoir qu'elle a été bloquée (doc la concernant only).
       match /blocked/{blockedUid} {
         allow read: if request.auth != null
                     && (request.auth.uid == uid || request.auth.uid == blockedUid);
@@ -19,23 +19,18 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
     }
-
     // Anniversaires publics (jour + mois uniquement) des utilisateurs ayant
-    // activé le rappel. Lecture d'UN doc par son uid (pas de listing/aspiration),
-    // écriture par le seul propriétaire.
+    // activé le rappel. Lisible par tout compte connecté, écrit par le seul
+    // propriétaire.
     match /birthdays/{uid} {
-      allow get:   if request.auth != null;
+      allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == uid;
     }
-
-    // Annuaire des pseudos. Lecture d'UN doc par son pseudo (pas de listing),
-    // création/suppression par le propriétaire de l'uid.
     match /usernames/{username} {
-      allow get:    if request.auth != null;
+      allow read: if request.auth != null;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
       allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
-
     match /connectionRequests/{reqId} {
       allow create: if request.auth != null && request.resource.data.fromUid == request.auth.uid;
       allow read:   if request.auth != null && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
@@ -43,43 +38,16 @@ service cloud.firestore {
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
       allow delete: if request.auth != null && resource.data.fromUid == request.auth.uid;
     }
-
     match /invitations/{inviteId} {
-      // Lecture d'UNE invitation par son code (l'invité connaît le code).
-      allow get:  if request.auth != null;
-      // Listing réservé à ses propres invitations (l'invitant suit ses redemptions).
-      allow list: if request.auth != null && resource.data.fromUid == request.auth.uid;
+      allow read:   if request.auth != null;
       allow create: if request.auth != null && request.resource.data.fromUid == request.auth.uid;
-      allow update: if request.auth != null && (
-        // L'invité accepte : il se pose en toUid, sans toucher au créateur
-        // ni au code, et ne peut pas détourner une invitation déjà acceptée
-        // par quelqu'un d'autre.
-        (
-          request.resource.data.fromUid == resource.data.fromUid
-          && request.resource.data.code == resource.data.code
-          && request.resource.data.toUid == request.auth.uid
-          && request.auth.uid != resource.data.fromUid
-          && (!('toUid' in resource.data) || resource.data.toUid == request.auth.uid)
-        )
-        ||
-        // L'invitant se réconcilie de son côté : il ne modifie que 'reconciled'.
-        (
-          resource.data.fromUid == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reconciled'])
-        )
-      );
+      allow update: if request.auth != null;
     }
-
     match /hearts/{heartId} {
-      // Création : par l'expéditeur, ni bloqué dans un sens ni dans l'autre,
-      // avec des valeurs bornées (anti-abus).
+      // Refuse l'envoi si le destinataire a bloqué l'expéditeur,
+      // OU si l'expéditeur a lui-même bloqué le destinataire.
       allow create: if request.auth != null
                     && request.resource.data.fromUid == request.auth.uid
-                    && request.resource.data.count is int
-                    && request.resource.data.count > 0
-                    && request.resource.data.count <= 100
-                    && request.resource.data.message is string
-                    && request.resource.data.message.size() <= 300
                     && !exists(/databases/$(database)/documents/users/$(request.resource.data.toUid)/blocked/$(request.auth.uid))
                     && !exists(/databases/$(database)/documents/users/$(request.auth.uid)/blocked/$(request.resource.data.toUid));
       allow read:   if request.auth != null && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);

@@ -9,6 +9,7 @@ import '../connections/username.dart';
 import '../profile/profile_providers.dart';
 import 'loved_one.dart';
 import 'people_providers.dart';
+import '../premium/premium_prefs.dart';
 
 const _emojiChoices = <String>[
   '🌷', '☀️', '🧸', '💗', '🌸', '⭐', '🌙', '🐻', '🌊', '🍀', '🎈', '🦋',
@@ -18,7 +19,7 @@ const _colorChoices = <int>[
   0xFFFFD4E2,
   0xFFFFECB2,
   0xFFD8F4E9,
-  0xFFCBB8FF,
+  0xFFE3D9FF,
   0xFFB8E0FF,
   0xFFFFD9C0,
 ];
@@ -29,6 +30,29 @@ Future<void> showPersonEditor(
   WidgetRef ref, {
   LovedOne? existing,
 }) {
+  // Ajout d'un nouveau proche : on verifie la limite AVANT d'ouvrir la feuille,
+  // pour ne pas laisser l'utilisateur bloque dans une feuille sans issue.
+  if (existing == null && !ref.read(isPremiumProvider)) {
+    final count = ref.read(peopleProvider).value?.length ?? 0;
+    if (count >= kFreeContactsLimit) {
+      return showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Limite atteinte'),
+          content: Text(
+            'Tu as atteint la limite de $kFreeContactsLimit proches. '
+            'Passe en Premium pour en ajouter davantage.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Compris'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -137,6 +161,19 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
         );
         navigator.pop();
         return;
+      }
+
+      // Limite de proches sans Premium (l'ajout, pas la modification).
+      if (!ref.read(isPremiumProvider)) {
+        final count = ref.read(peopleProvider).value?.length ?? 0;
+        if (count >= kFreeContactsLimit) {
+          setState(() {
+            _saving = false;
+            _error = 'Tu as atteint la limite de $kFreeContactsLimit proches. '
+                'Passe en Premium pour en ajouter davantage.';
+          });
+          return;
+        }
       }
 
       // Email obligatoirement vérifié pour ajouter quelqu'un.
@@ -284,29 +321,48 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(24, 16, 24, 24 + bottomInset),
-      child: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
             children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.black12,
-                    borderRadius: BorderRadius.circular(2),
+              Expanded(
+                child: Text(
+                  _isEdit ? 'Modifier ce proche' : 'Ajouter quelqu\'un',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
-              const SizedBox(height: 18),
-              Text(
-                _isEdit ? 'Modifier ce proche' : 'Ajouter quelqu\'un',
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded),
+                tooltip: 'Fermer',
               ),
-              const SizedBox(height: 18),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
               Center(
                 child: CircleAvatar(
                   radius: 34,
@@ -484,9 +540,12 @@ class _PersonEditorSheetState extends ConsumerState<_PersonEditorSheet> {
                       )
                     : Text(_isEdit ? 'Enregistrer' : 'Ajouter'),
               ),
-            ],
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

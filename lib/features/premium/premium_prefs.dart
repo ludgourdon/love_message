@@ -108,6 +108,27 @@ final sharedPreferencesProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError('SharedPreferences non initialisées'),
 );
 
+/// Nombre de proches autorisés sans Premium.
+const kFreeContactsLimit = 5;
+
+/// Statut Premium. Pour l'instant, activable manuellement (mode test) — à
+/// brancher sur l'achat in-app quand il sera prêt. Persisté sur l'appareil.
+class PremiumNotifier extends Notifier<bool> {
+  @override
+  bool build() {
+    final prefs = ref.read(sharedPreferencesProvider);
+    return prefs.getBool('premium.active') ?? false;
+  }
+
+  void set(bool value) {
+    state = value;
+    ref.read(sharedPreferencesProvider).setBool('premium.active', value);
+  }
+}
+
+final isPremiumProvider =
+    NotifierProvider<PremiumNotifier, bool>(PremiumNotifier.new);
+
 /// Notifier générique : mémorise un index sélectionné (thème, animation, pack).
 class PremiumChoiceNotifier extends Notifier<int> {
   PremiumChoiceNotifier(this.storageKey, this.count);
@@ -135,23 +156,72 @@ final animationStyleIndexProvider =
     NotifierProvider<PremiumChoiceNotifier, int>(
   () => PremiumChoiceNotifier('premium.anim', kAnimationStyles.length),
 );
-final wordPackIndexProvider = NotifierProvider<PremiumChoiceNotifier, int>(
-  () => PremiumChoiceNotifier('premium.pack', kWordPacks.length),
-);
+/// Multi-sélection Premium : quels packs de petits mots apparaissent sur
+/// l'écran d'envoi. Par défaut tous activés. Persisté sur l'appareil.
+class WordPacksNotifier extends Notifier<Set<int>> {
+  static const _key = 'premium.packs';
+
+  @override
+  Set<int> build() {
+    final prefs = ref.read(sharedPreferencesProvider);
+    final stored = prefs.getStringList(_key);
+    if (stored == null) {
+      return {for (var i = 0; i < kWordPacks.length; i++) i};
+    }
+    final set = <int>{};
+    for (final s in stored) {
+      final v = int.tryParse(s);
+      if (v != null && v >= 0 && v < kWordPacks.length) set.add(v);
+    }
+    return set.isEmpty ? {0} : set;
+  }
+
+  void toggle(int index) {
+    if (index < 0 || index >= kWordPacks.length) return;
+    final next = {...state};
+    if (next.contains(index)) {
+      if (next.length <= 1) return; // on garde au moins un pack activé
+      next.remove(index);
+    } else {
+      next.add(index);
+    }
+    state = next;
+    ref
+        .read(sharedPreferencesProvider)
+        .setStringList(_key, next.map((e) => e.toString()).toList());
+  }
+}
+
+final enabledWordPacksProvider =
+    NotifierProvider<WordPacksNotifier, Set<int>>(WordPacksNotifier.new);
 final bondStyleIndexProvider = NotifierProvider<PremiumChoiceNotifier, int>(
   () => PremiumChoiceNotifier('premium.bond', kBondStyles.length),
 );
 
 /// Valeurs dérivées, pratiques à consommer dans l'UI.
-final themeAccentProvider = Provider<ThemeAccent>(
-  (ref) => kThemeAccents[ref.watch(themeAccentIndexProvider)],
-);
-final animationStyleProvider = Provider<AnimationStyle>(
-  (ref) => kAnimationStyles[ref.watch(animationStyleIndexProvider)],
-);
-final wordPackProvider = Provider<WordPack>(
-  (ref) => kWordPacks[ref.watch(wordPackIndexProvider)],
-);
+// Les thèmes, animations et packs ne s'appliquent que pour un compte Premium ;
+// sinon on retombe sur l'option par défaut (index 0).
+final themeAccentProvider = Provider<ThemeAccent>((ref) {
+  final i =
+      ref.watch(isPremiumProvider) ? ref.watch(themeAccentIndexProvider) : 0;
+  return kThemeAccents[i];
+});
+final animationStyleProvider = Provider<AnimationStyle>((ref) {
+  final i =
+      ref.watch(isPremiumProvider) ? ref.watch(animationStyleIndexProvider) : 0;
+  return kAnimationStyles[i];
+});
+/// Packs à afficher sur l'écran d'envoi : non-Premium -> uniquement le premier ;
+/// Premium -> les packs choisis (au moins un).
+final sendWordPacksProvider = Provider<List<WordPack>>((ref) {
+  if (!ref.watch(isPremiumProvider)) return [kWordPacks.first];
+  final enabled = ref.watch(enabledWordPacksProvider);
+  final list = <WordPack>[
+    for (var i = 0; i < kWordPacks.length; i++)
+      if (enabled.contains(i)) kWordPacks[i],
+  ];
+  return list.isEmpty ? [kWordPacks.first] : list;
+});
 final bondStyleProvider = Provider<BondStyle>(
   (ref) => kBondStyles[ref.watch(bondStyleIndexProvider)],
 );

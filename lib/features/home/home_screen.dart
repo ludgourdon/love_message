@@ -64,22 +64,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final data = message.data;
     final type = (data['type'] ?? '').toString();
     final fromUid = (data['fromUid'] ?? '').toString();
-    if (type == 'reply_reminder') {
-      // Relance : on ouvre l'écran d'envoi vers la personne (ou l'onglet
-      // « Recevoir » si la relance concernait plusieurs personnes).
-      ref.read(pendingNotificationTapProvider.notifier).set(fromUid);
+    final notifier = ref.read(pendingNotificationTapProvider.notifier);
+    if (type == 'reply_reminder' || type == 'birthday') {
+      // Relance ou anniversaire : on ouvre l'écran d'envoi vers la personne
+      // (ou l'onglet « Recevoir » si aucune personne précise).
+      notifier.set(PendingTap(fromUid.isEmpty ? 'receive' : 'send', fromUid));
     } else if (type == 'heart') {
-      // Réception : on ouvre l'onglet « Recevoir » pour voir les cœurs reçus.
-      ref.read(pendingNotificationTapProvider.notifier).set('');
+      // Réception : on ouvre directement le détail des cœurs de l'expéditeur
+      // (ou l'onglet « Recevoir » si l'expéditeur est inconnu).
+      notifier.set(PendingTap(fromUid.isEmpty ? 'receive' : 'hearts', fromUid));
     }
   }
 
   /// Consomme une cible en attente : ouvre l'écran d'envoi vers le proche
   /// concerné, ou à défaut l'onglet « Recevoir ».
-  void _handlePendingTap(String pending, List<LovedOne>? people) {
+  void _handlePendingTap(
+    PendingTap pending,
+    List<LovedOne>? people,
+    List<Heart>? received,
+  ) {
     if (_navigating) return;
-    // Pour une cible précise, on attend que la liste des proches soit prête.
-    if (pending.isNotEmpty && people == null) return;
+    final action = pending.action;
+    final uid = pending.uid;
+    // On attend d'avoir les données nécessaires avant de naviguer.
+    if (action == 'send' && people == null) return;
+    if (action == 'hearts' && (people == null || received == null)) return;
     _navigating = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(pendingNotificationTapProvider.notifier).clear();
@@ -87,19 +96,43 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _navigating = false;
         return;
       }
-      LovedOne? target;
-      if (pending.isNotEmpty && people != null) {
-        for (final p in people) {
-          if (p.linkedUid == pending) {
-            target = p;
-            break;
-          }
+      LovedOne? personFor(String u) {
+        for (final p in (people ?? const <LovedOne>[])) {
+          if (p.linkedUid == u) return p;
         }
+        return null;
       }
-      if (target != null) {
-        _openSend(target);
+
+      if (action == 'send') {
+        final target = personFor(uid);
+        if (target != null) {
+          _openSend(target);
+        } else {
+          setState(() => _tab = 1);
+        }
+      } else if (action == 'hearts') {
+        final hearts =
+            (received ?? const <Heart>[]).where((h) => h.fromUid == uid).toList();
+        if (hearts.isEmpty) {
+          setState(() => _tab = 1);
+        } else {
+          final person = personFor(uid);
+          final deleted =
+              ref.read(deletedLinkedUidsProvider).value ?? const <String>{};
+          final name = person?.name ?? hearts.first.fromName;
+          setState(() => _tab = 1);
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => _SenderHeartsPage(
+                name: name,
+                hearts: hearts,
+                person: deleted.contains(uid) ? null : person,
+              ),
+            ),
+          );
+        }
       } else {
-        setState(() => _tab = 1); // onglet « Recevoir »
+        setState(() => _tab = 1); // 'receive'
       }
       _navigating = false;
     });
@@ -107,13 +140,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final incomingCount =
-        ref.watch(incomingRequestsProvider).value?.length ?? 0;
+    final incomingRequests =
+        ref.watch(incomingRequestsProvider).value ?? const [];
+    final redeemedCount =
+        ref.watch(redeemedInvitationsProvider).value?.length ?? 0;
+    final birthdaysCount =
+        ref.watch(birthdayTodayUidsProvider).value?.length ?? 0;
+    // Compteur « non-lu » : uniquement ce qui est arrivé depuis la dernière
+    // ouverture de la page Notifications.
+    final lastOpenedMs = ref.watch(notificationsLastOpenedProvider);
+    final nowDt = DateTime.now();
+    final startOfTodayMs =
+        DateTime(nowDt.year, nowDt.month, nowDt.day).millisecondsSinceEpoch;
+    final newRequests = incomingRequests.where((r) {
+      final c = r.createdAt;
+      return c == null || c.millisecondsSinceEpoch > lastOpenedMs;
+    }).length;
+    // Anniversaires : « nouveaux » tant que la page n'a pas été ouverte
+    // aujourd'hui (ils changent chaque jour).
+    final newBirthdays =
+        (birthdaysCount > 0 && lastOpenedMs < startOfTodayMs) ? birthdaysCount : 0;
+    // Cœurs reçus « nouveaux » depuis la dernière ouverture (fenêtre 7 jours).
+    final receivedHearts =
+        ref.watch(receivedHeartsProvider).value ?? const <Heart>[];
+    final weekAgoMs =
+        nowDt.subtract(const Duration(days: 7)).millisecondsSinceEpoch;
+    final newHearts = receivedHearts.where((h) {
+      final c = h.createdAt;
+      if (c == null) return true; // tout juste reçu
+      final ms = c.millisecondsSinceEpoch;
+      return ms > lastOpenedMs && ms >= weekAgoMs;
+    }).length;
+    final notifCount =
+        newRequests + newBirthdays + redeemedCount + newHearts;
     final unseenHearts = ref.watch(unseenHeartsCountProvider);
     final accent = ref.watch(themeAccentProvider).seed;
     final pendingTap = ref.watch(pendingNotificationTapProvider);
     if (pendingTap != null) {
-      _handlePendingTap(pendingTap, ref.watch(peopleProvider).value);
+      _handlePendingTap(
+        pendingTap,
+        ref.watch(peopleProvider).value,
+        ref.watch(receivedHeartsProvider).value,
+      );
     }
     final uid = ref.watch(authStateProvider).value?.uid;
     if (uid != _heartsUid) {
@@ -163,15 +231,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     label: const Text('Premium'),
                     style: TextButton.styleFrom(foregroundColor: accent),
                   ),
-                  Badge.count(
-                    count: incomingCount,
-                    isLabelVisible: incomingCount > 0,
-                    child: IconButton(
-                      onPressed: () => context.push('/requests'),
-                      icon: const Icon(Icons.notifications_none_rounded),
-                      color: accent,
-                      tooltip: 'Demandes',
-                    ),
+                  _NotificationBell(
+                    count: notifCount,
+                    color: accent,
+                    onTap: () => context.push('/requests'),
                   ),
                   IconButton(
                     onPressed: () => context.push('/profile'),
@@ -432,8 +495,12 @@ class WorldPage extends ConsumerWidget {
       for (final r in outgoing) r.id: r.status,
     };
     final blocked = ref.watch(blockedUidsProvider).value ?? const <String>{};
+    final blockedByThem =
+        ref.watch(blockedByUidsProvider).value ?? const <String>{};
     final deletedAccounts =
         ref.watch(deletedLinkedUidsProvider).value ?? const <String>{};
+    final birthdaysToday =
+        ref.watch(birthdayTodayUidsProvider).value ?? const <String>{};
     final streaks = ref.watch(bondStreaksProvider);
     final bondStyleIndex = ref.watch(bondStyleIndexProvider);
     final accent = ref.watch(themeAccentProvider);
@@ -448,12 +515,12 @@ class WorldPage extends ConsumerWidget {
             fontWeight: FontWeight.w700,
             height: 1.1,
             letterSpacing: -0.2,
-            color: accent.seed,
+            color: kInk,
           ),
         ),
         const SizedBox(height: 10),
         Text(
-          'Les personnes qui comptent, réunies ici.',
+          'Les personnes qui comptent, réunies ici',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w500,
@@ -489,6 +556,10 @@ class WorldPage extends ConsumerWidget {
                         blocked.contains(person.linkedUid),
                     accountDeleted: person.linkedUid != null &&
                         deletedAccounts.contains(person.linkedUid),
+                    blockedByThem: person.linkedUid != null &&
+                        blockedByThem.contains(person.linkedUid),
+                    isBirthday: person.linkedUid != null &&
+                        birthdaysToday.contains(person.linkedUid),
                     streak: (person.linkedUid != null &&
                             !deletedAccounts.contains(person.linkedUid))
                         ? streaks[person.linkedUid]
@@ -501,6 +572,28 @@ class WorldPage extends ConsumerWidget {
                           const SnackBar(
                             content: Text(
                                 'Ce compte a été supprimé. Tu ne peux plus lui '
+                                'envoyer de cœurs.'),
+                          ),
+                        );
+                        return;
+                      }
+                      if (person.linkedUid != null &&
+                          blocked.contains(person.linkedUid)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                                'Tu as bloqué ${person.name}. Débloque-le pour '
+                                'lui envoyer des cœurs.'),
+                          ),
+                        );
+                        return;
+                      }
+                      if (person.linkedUid != null &&
+                          blockedByThem.contains(person.linkedUid)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'Ce proche t\'a bloqué. Tu ne peux plus lui '
                                 'envoyer de cœurs.'),
                           ),
                         );
@@ -544,7 +637,7 @@ class WorldPage extends ConsumerWidget {
           onPressed: () => context.push('/redeem'),
           icon: const Icon(Icons.card_giftcard_rounded, size: 18),
           label: const Text('J’ai un code d’invitation'),
-          style: TextButton.styleFrom(foregroundColor: kPink),
+          style: TextButton.styleFrom(foregroundColor: accent.seed),
         ),
       ],
     );
@@ -681,6 +774,8 @@ class _PersonCard extends StatelessWidget {
     this.status,
     this.blocked = false,
     this.accountDeleted = false,
+    this.blockedByThem = false,
+    this.isBirthday = false,
     this.onBlock,
     this.onUnblock,
     this.streak,
@@ -693,6 +788,8 @@ class _PersonCard extends StatelessWidget {
   final (String, Color)? status;
   final bool blocked;
   final bool accountDeleted;
+  final bool blockedByThem;
+  final bool isBirthday;
   final VoidCallback? onBlock;
   final VoidCallback? onUnblock;
   final BondStreak? streak;
@@ -777,6 +874,30 @@ class _PersonCard extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(person.note),
                     ],
+                    if (isBirthday &&
+                        !accountDeleted &&
+                        !blocked &&
+                        !blockedByThem) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: kPink.withValues(alpha: .18),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          "🎂 Joyeux anniversaire !",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: kPink,
+                          ),
+                        ),
+                      ),
+                    ],
                     if (accountDeleted) ...[
                       const SizedBox(height: 8),
                       Container(
@@ -814,6 +935,26 @@ class _PersonCard extends StatelessWidget {
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: Colors.redAccent,
+                          ),
+                        ),
+                      ),
+                    ] else if (blockedByThem) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: .08),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          'Tu as été bloqué par ce proche',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black54,
                           ),
                         ),
                       ),
@@ -910,6 +1051,87 @@ class _BondBadge extends StatelessWidget {
   }
 }
 
+/// Cloche animée : sonne (léger balancement) tant qu'il reste des
+/// notifications non lues.
+class _NotificationBell extends StatefulWidget {
+  const _NotificationBell({
+    required this.count,
+    required this.color,
+    required this.onTap,
+  });
+  final int count;
+  final Color color;
+  final VoidCallback onTap;
+  @override
+  State<_NotificationBell> createState() => _NotificationBellState();
+}
+
+class _NotificationBellState extends State<_NotificationBell>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+  late final Animation<double> _angle;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    );
+    _angle = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 0.18), weight: 8),
+      TweenSequenceItem(tween: Tween(begin: 0.18, end: -0.15), weight: 12),
+      TweenSequenceItem(tween: Tween(begin: -0.15, end: 0.10), weight: 10),
+      TweenSequenceItem(tween: Tween(begin: 0.10, end: -0.06), weight: 8),
+      TweenSequenceItem(tween: Tween(begin: -0.06, end: 0.0), weight: 6),
+      TweenSequenceItem(tween: ConstantTween(0.0), weight: 76),
+    ]).animate(_c);
+    if (widget.count > 0) _c.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _NotificationBell old) {
+    super.didUpdateWidget(old);
+    if (widget.count > 0 && !_c.isAnimating) {
+      _c.repeat();
+    } else if (widget.count == 0 && _c.isAnimating) {
+      _c.stop();
+      _c.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.count > 0;
+    return Badge.count(
+      count: widget.count,
+      isLabelVisible: widget.count > 0,
+      child: IconButton(
+        onPressed: widget.onTap,
+        color: widget.color,
+        tooltip: 'Notifications',
+        icon: AnimatedBuilder(
+          animation: _angle,
+          builder: (context, child) => Transform.rotate(
+            angle: _angle.value,
+            alignment: Alignment.topCenter,
+            child: child,
+          ),
+          child: Icon(active
+              ? Icons.notifications_active_rounded
+              : Icons.notifications_none_rounded),
+        ),
+      ),
+    );
+  }
+}
+
 class SendLovePage extends ConsumerStatefulWidget {
   const SendLovePage({super.key, required this.person});
   final LovedOne person;
@@ -921,8 +1143,10 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   final _message = TextEditingController();
+  static const _maxHearts = 99;
   var _count = 0;
   bool _sending = false;
+  bool _maxNotified = false;
 
   @override
   void initState() {
@@ -941,6 +1165,17 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
   }
 
   void _sendHeart() {
+    if (_count >= _maxHearts) {
+      if (!_maxNotified) {
+        _maxNotified = true;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Quelle belle pluie d\'amour ! ($_maxHearts cœurs max)'),
+          ),
+        );
+      }
+      return;
+    }
     setState(() => _count++);
     _controller.forward(from: 0);
   }
@@ -958,6 +1193,34 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
     final messenger = ScaffoldMessenger.of(context);
     final s = _count > 1 ? 's' : '';
     final message = _message.text.trim();
+
+    // Contact bloqué : on n'envoie pas de cœurs à quelqu'un qu'on a bloqué.
+    final linkedForBlock = person.linkedUid;
+    if (linkedForBlock != null) {
+      final myBlocked =
+          ref.read(blockedUidsProvider).value ?? const <String>{};
+      if (myBlocked.contains(linkedForBlock)) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+                'Tu as bloqué ${person.name}. Débloque-le pour lui envoyer '
+                'des cœurs.'),
+          ),
+        );
+        return;
+      }
+      final blockedByThem =
+          ref.read(blockedByUidsProvider).value ?? const <String>{};
+      if (blockedByThem.contains(linkedForBlock)) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Ce proche t\'a bloqué. Tu ne peux plus lui envoyer de cœurs.'),
+          ),
+        );
+        return;
+      }
+    }
 
     // Email obligatoirement vérifié pour envoyer des cœurs.
     final verified =
@@ -1041,8 +1304,8 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
 
   @override
   Widget build(BuildContext context) {
-    final pack = ref.watch(wordPackProvider);
     final accent = ref.watch(themeAccentProvider).seed;
+    final packs = ref.watch(sendWordPacksProvider);
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -1129,30 +1392,50 @@ class _SendLovePageState extends ConsumerState<SendLovePage>
                       ),
                     ),
                     const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        for (final word in pack.words)
-                          ChoiceChip(
-                            label: Text(word),
-                            selected: _message.text == word,
-                            selectedColor: accent.withValues(alpha: .2),
-                            onSelected: (_) => _pickWord(word),
+                        for (final wp in packs) ...[
+                          if (packs.length > 1)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4, bottom: 8),
+                              child: Text(
+                                '${wp.emoji}  ${wp.name}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: kInk,
+                                ),
+                              ),
+                            ),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final word in wp.words)
+                                ChoiceChip(
+                                  label: Text(word),
+                                  selected: _message.text == word,
+                                  selectedColor: accent.withValues(alpha: .2),
+                                  onSelected: (_) => _pickWord(word),
+                                ),
+                            ],
                           ),
+                          const SizedBox(height: 14),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _message,
                       textCapitalization: TextCapitalization.sentences,
-                      inputFormatters: [LengthLimitingTextInputFormatter(26)],
+                      inputFormatters: [LengthLimitingTextInputFormatter(80)],
                       onChanged: (_) => setState(() {}),
                       decoration: const InputDecoration(
                         hintText: 'Ton petit mot…',
                         prefixIcon: Icon(Icons.mode_edit_outline),
                         border: OutlineInputBorder(),
-                        helperText: '26 caractères max en saisie libre',
+                        helperText: '80 caractères max en saisie libre',
                       ),
                     ),
                   ],
@@ -1283,14 +1566,14 @@ class ReceivePage extends ConsumerWidget {
             fontWeight: FontWeight.w700,
             height: 1.1,
             letterSpacing: -0.2,
-            color: accentSeed,
+            color: kInk,
           ),
         ),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: kLavender.withValues(alpha: .35),
+            color: accentSeed.withValues(alpha: .16),
             borderRadius: BorderRadius.circular(28),
           ),
           child: Column(
@@ -1312,6 +1595,7 @@ class ReceivePage extends ConsumerWidget {
           _SenderTotalRow(
             name: nameByUid[uid] ?? 'Quelqu\'un',
             count: countByUid[uid]!,
+            isNew: (heartsByUid[uid] ?? const <Heart>[]).any((h) => !h.seen),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => _SenderHeartsPage(
@@ -1336,30 +1620,61 @@ String _heartDateLabel(DateTime dt) {
 }
 
 class _SenderTotalRow extends StatelessWidget {
-  const _SenderTotalRow({required this.name, required this.count, this.onTap});
+  const _SenderTotalRow({
+    required this.name,
+    required this.count,
+    this.isNew = false,
+    this.onTap,
+  });
   final String name;
   final int count;
+  final bool isNew;
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
     final s = count > 1 ? 's' : '';
     return Material(
-      color: Colors.white,
+      color: isNew ? kPink.withValues(alpha: .10) : Colors.white,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
-        child: Padding(
+        child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isNew ? kPink : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
           child: Row(
             children: [
-              Expanded(
+              Flexible(
                 child: Text(
                   name,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.w700),
                 ),
               ),
+              if (isNew) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: kPink,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text('nouveau',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700)),
+                ),
+              ],
+              const Spacer(),
               Text(
                 '$count cœur$s 💗',
                 style: const TextStyle(
@@ -1401,16 +1716,35 @@ class _SenderHeartsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
         children: [
-          Text(
-            '$total cœur${total > 1 ? 's' : ''} reçu${total > 1 ? 's' : ''} '
-            'de $name',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          Row(
+            children: [
+              const Text('💌', style: TextStyle(fontSize: 34)),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$total cœur${total > 1 ? 's' : ''} '
+                      'reçu${total > 1 ? 's' : ''} en tout',
+                      style: const TextStyle(
+                          fontSize: 13.5, color: Colors.black54),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           for (final h in hearts) ...[
             _HeartTile(
               heart: h,
-              displayName: name,
               onReply: (!h.seen && target != null) ? reply : null,
             ),
             const SizedBox(height: 10),
@@ -1424,11 +1758,9 @@ class _SenderHeartsPage extends StatelessWidget {
 class _HeartTile extends StatelessWidget {
   const _HeartTile({
     required this.heart,
-    required this.displayName,
     this.onReply,
   });
   final Heart heart;
-  final String displayName;
 
   /// Si non nul, la carte devient cliquable pour répondre à ce contact.
   final VoidCallback? onReply;
@@ -1473,34 +1805,16 @@ class _HeartTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('💌', style: TextStyle(fontSize: 28)),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(displayName,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w800, fontSize: 16)),
-                    const SizedBox(height: 2),
-                    Text(
-                        't’envoie ${heart.count} cœur${heart.count > 1 ? 's' : ''} 💗'),
-                    if (heart.message.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        '« ${heart.message} »',
-                        style: const TextStyle(
-                            fontStyle: FontStyle.italic, color: kInk),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
+          Text(
+              't’envoie ${heart.count} cœur${heart.count > 1 ? 's' : ''} 💗'),
+          if (heart.message.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '« ${heart.message} »',
+              style: const TextStyle(
+                  fontStyle: FontStyle.italic, color: kInk),
+            ),
+          ],
           if (onReply != null) ...[
             const SizedBox(height: 12),
             Row(
@@ -1552,12 +1866,12 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
   Widget build(BuildContext context) {
     final accent = ref.watch(themeAccentProvider);
     final animIndex = ref.watch(animationStyleIndexProvider);
-    final packIndex = ref.watch(wordPackIndexProvider);
+    final enabledPacks = ref.watch(enabledWordPacksProvider);
     final themeIndex = ref.watch(themeAccentIndexProvider);
     final bondIndex = ref.watch(bondStyleIndexProvider);
     final anim = kAnimationStyles[animIndex];
-    final pack = kWordPacks[packIndex];
     final seed = accent.seed;
+    final premium = ref.watch(isPremiumProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -1579,25 +1893,36 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
               ),
               const SizedBox(height: 14),
               Container(
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
                 decoration: BoxDecoration(
                   color: seed.withValues(alpha: .10),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Row(
                   children: [
-                    const Text('🎁', style: TextStyle(fontSize: 22)),
+                    Text(premium ? '💎' : '🔒',
+                        style: const TextStyle(fontSize: 22)),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        'Version découverte : tout est débloqué pour que tu '
-                        'puisses essayer librement.',
-                        style: TextStyle(
-                          color: kInk,
-                          fontWeight: FontWeight.w600,
-                          height: 1.25,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Premium (mode test)',
+                              style: TextStyle(fontWeight: FontWeight.w800)),
+                          Text(
+                            premium
+                                ? 'Actif : thèmes, animations, packs et proches illimités, sans pub.'
+                                : 'Active pour tester l\'expérience Premium.',
+                            style: const TextStyle(fontSize: 12.5, color: kInk),
+                          ),
+                        ],
                       ),
+                    ),
+                    Switch(
+                      value: premium,
+                      activeColor: kPink,
+                      onChanged: (v) =>
+                          ref.read(isPremiumProvider.notifier).set(v),
                     ),
                   ],
                 ),
@@ -1614,9 +1939,15 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                   for (var i = 0; i < kThemeAccents.length; i++)
                     _AccentSwatch(
                       accent: kThemeAccents[i],
-                      selected: i == themeIndex,
-                      onTap: () =>
-                          ref.read(themeAccentIndexProvider.notifier).select(i),
+                      selected: premium && i == themeIndex,
+                      locked: !premium && i != 0,
+                      onTap: () {
+                        if (!premium && i != 0) {
+                          _premiumRequired(context);
+                          return;
+                        }
+                        ref.read(themeAccentIndexProvider.notifier).select(i);
+                      },
                     ),
                 ],
               ),
@@ -1627,11 +1958,16 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
               const SizedBox(height: 12),
               for (var i = 0; i < kAnimationStyles.length; i++)
                 _ChoiceTile(
-                  selected: i == animIndex,
+                  selected: premium && i == animIndex,
                   seed: seed,
-                  onTap: () => ref
-                      .read(animationStyleIndexProvider.notifier)
-                      .select(i),
+                  locked: !premium && i != 0,
+                  onTap: () {
+                    if (!premium && i != 0) {
+                      _premiumRequired(context);
+                      return;
+                    }
+                    ref.read(animationStyleIndexProvider.notifier).select(i);
+                  },
                   title: kAnimationStyles[i].name,
                   trailing: Text(
                     kAnimationStyles[i].emojis.take(4).join(' '),
@@ -1653,34 +1989,28 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
 
               // ---- Packs de petits mots ----
               const _PremiumSection('💬', 'Packs de petits mots'),
+              const SizedBox(height: 6),
+              const Text(
+                'Choisis les packs à proposer sur l\'écran d\'envoi.',
+                style: TextStyle(fontSize: 13, color: kInk),
+              ),
               const SizedBox(height: 12),
               for (var i = 0; i < kWordPacks.length; i++)
                 _ChoiceTile(
-                  selected: i == packIndex,
+                  multi: true,
+                  selected: premium && enabledPacks.contains(i),
                   seed: seed,
-                  onTap: () =>
-                      ref.read(wordPackIndexProvider.notifier).select(i),
+                  locked: !premium,
+                  onTap: () {
+                    if (!premium) {
+                      _premiumRequired(context);
+                      return;
+                    }
+                    ref.read(enabledWordPacksProvider.notifier).toggle(i);
+                  },
                   title: '${kWordPacks[i].emoji}  ${kWordPacks[i].name}',
                   subtitle: kWordPacks[i].words.take(2).join(' · '),
                 ),
-              const SizedBox(height: 10),
-              Text(
-                'Aperçu de « ${pack.name} » :',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final w in pack.words)
-                    Chip(
-                      label: Text(w),
-                      backgroundColor: seed.withValues(alpha: .12),
-                      side: BorderSide.none,
-                    ),
-                ],
-              ),
               const SizedBox(height: 28),
 
               // ---- Style du lien ----
@@ -1710,12 +2040,19 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Icon(Icons.check_circle_rounded, color: seed),
+                  Icon(
+                    premium
+                        ? Icons.check_circle_rounded
+                        : Icons.lock_outline_rounded,
+                    color: premium ? seed : kInk,
+                  ),
                   const SizedBox(width: 10),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Déjà actif : ajoute autant de proches que tu veux.',
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                      premium
+                          ? 'Actif : ajoute autant de proches que tu veux.'
+                          : 'Sans Premium : jusqu\'à $kFreeContactsLimit proches.',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -1779,14 +2116,18 @@ class _AccentSwatch extends StatelessWidget {
     required this.accent,
     required this.selected,
     required this.onTap,
+    this.locked = false,
   });
   final ThemeAccent accent;
   final bool selected;
   final VoidCallback onTap;
+  final bool locked;
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
-    child: Column(
+    child: Opacity(
+      opacity: locked ? 0.5 : 1,
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
@@ -1809,7 +2150,10 @@ class _AccentSwatch extends StatelessWidget {
           ),
           child: selected
               ? const Icon(Icons.check_rounded, color: Colors.white)
-              : null,
+              : (locked
+                  ? const Icon(Icons.lock_rounded,
+                      color: Colors.white, size: 20)
+                  : null),
         ),
         const SizedBox(height: 6),
         SizedBox(
@@ -1824,6 +2168,7 @@ class _AccentSwatch extends StatelessWidget {
           ),
         ),
       ],
+      ),
     ),
   );
 }
@@ -1836,6 +2181,8 @@ class _ChoiceTile extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.trailing,
+    this.locked = false,
+    this.multi = false,
   });
   final bool selected;
   final Color seed;
@@ -1843,6 +2190,8 @@ class _ChoiceTile extends StatelessWidget {
   final String title;
   final String? subtitle;
   final Widget? trailing;
+  final bool locked;
+  final bool multi;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
@@ -1864,9 +2213,15 @@ class _ChoiceTile extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                selected
-                    ? Icons.radio_button_checked_rounded
-                    : Icons.radio_button_off_rounded,
+                locked
+                    ? Icons.lock_outline_rounded
+                    : multi
+                        ? (selected
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded)
+                        : (selected
+                            ? Icons.radio_button_checked_rounded
+                            : Icons.radio_button_off_rounded),
                 color: selected ? seed : kInk,
               ),
               const SizedBox(width: 12),
@@ -1896,6 +2251,13 @@ class _ChoiceTile extends StatelessWidget {
     ),
   );
 }
+
+void _premiumRequired(BuildContext context) =>
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Cette option est réservée à Premium 💎'),
+      ),
+    );
 
 void _comingSoon(BuildContext context) => ScaffoldMessenger.of(context)
     .showSnackBar(

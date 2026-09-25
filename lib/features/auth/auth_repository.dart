@@ -26,6 +26,10 @@ class AuthRepository {
     required String email,
     required String password,
     required String displayName,
+    required int birthdayDay,
+    required int birthdayMonth,
+    required int birthdayYear,
+    bool birthdayRemindersEnabled = true,
   }) async {
     final cred = await _auth.createUserWithEmailAndPassword(
       email: email.trim(),
@@ -39,7 +43,19 @@ class AuthRepository {
       'displayName': displayName.trim(),
       'photoUrl': null,
       'createdAt': FieldValue.serverTimestamp(),
+      'birthdayDay': birthdayDay,
+      'birthdayMonth': birthdayMonth,
+      'birthdayYear': birthdayYear,
+      'birthdayRemindersEnabled': birthdayRemindersEnabled,
+      'ageConfirmedAt': FieldValue.serverTimestamp(),
     });
+    // Version publique (jour + mois) lisible par les proches, si rappel activé.
+    if (birthdayRemindersEnabled) {
+      await _firestore.collection('birthdays').doc(user.uid).set({
+        'day': birthdayDay,
+        'month': birthdayMonth,
+      });
+    }
     // Envoie l'email de vérification (en français).
     await _auth.setLanguageCode('fr');
     await user.sendEmailVerification();

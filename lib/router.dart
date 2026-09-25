@@ -30,7 +30,7 @@ final GoRouter appRouter = GoRouter(
     GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen()),
     GoRoute(
       path: '/requests',
-      builder: (context, state) => const IncomingRequestsScreen(),
+      builder: (context, state) => const NotificationsScreen(),
     ),
     GoRoute(
       path: '/redeem',

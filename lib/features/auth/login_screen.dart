@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -43,28 +45,48 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _error = null;
     });
     try {
-      await auth.signIn(email: _email.text, password: _password.text);
-      // Cree le doc profil s'il manque (anciens comptes).
+      // Seule la connexion bloque le bouton ; un délai max évite le spinner
+      // infini si le réseau ne répond pas.
+      await auth
+          .signIn(email: _email.text, password: _password.text)
+          .timeout(const Duration(seconds: 25));
+      // La redirection go_router navigue dès que l'auth change. Les tâches
+      // d'entretien Firestore (profil, nom d'utilisateur) tournent en tâche
+      // de fond pour ne JAMAIS retenir la navigation.
       final user = auth.currentUser;
       if (user != null) {
-        await profileRepo.ensureProfile(user);
-        // Rattrape l'attribution du nom d'utilisateur (comptes anterieurs).
-        // Username attribué uniquement pour un compte vérifié.
-        if (user.emailVerified) {
-          await directory.ensureUsername(
-                uid: user.uid,
-                displayName: user.displayName ?? '',
-                email: user.email,
-              );
-        }
+        unawaited(_postSignInSetup(profileRepo, directory, user));
       }
-      // La redirection go_router s'occupe de la navigation.
+    } on TimeoutException {
+      setState(() => _error =
+          'La connexion prend trop de temps. Vérifie ta connexion et réessaie.');
     } on FirebaseAuthException catch (e) {
       setState(() => _error = authErrorMessage(e));
     } catch (_) {
       setState(() => _error = 'Une erreur est survenue. Réessaie.');
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Entretien post-connexion (non bloquant) : crée le profil manquant et
+  /// rattrape le nom d'utilisateur pour les anciens comptes.
+  Future<void> _postSignInSetup(
+    profileRepo,
+    directory,
+    User user,
+  ) async {
+    try {
+      await profileRepo.ensureProfile(user);
+      if (user.emailVerified) {
+        await directory.ensureUsername(
+          uid: user.uid,
+          displayName: user.displayName ?? '',
+          email: user.email,
+        );
+      }
+    } catch (_) {
+      // Sans gravité : ces étapes seront retentées à l'usage.
     }
   }
 

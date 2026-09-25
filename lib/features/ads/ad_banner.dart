@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'ads_providers.dart';
+import '../premium/premium_prefs.dart';
 
 /// Bannière publicitaire discrète, ancrée en bas.
 /// IDs de TEST pour l'instant : à remplacer par tes vrais blocs AdMob.
